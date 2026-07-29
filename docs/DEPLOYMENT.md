@@ -82,6 +82,30 @@ shell history. Add `--must-change` to force a replacement at first sign-in when
 someone other than the account holder runs it. Every other account is then
 created from **Accounts** inside the app.
 
+### Promoting a development database to production
+
+Supabase's free plan allows two active projects, so a separate production
+project is not always possible. When the development database has to become the
+live one, the seeded accounts are the problem: `anjali`, `priya`, `meera` and
+`ananya` all hold `Valmiki@2026`, and that string is public in this repository.
+Rotate every one of them before the site is reachable:
+
+```bash
+npm run password:set -- --username priya --random     # prints a new password once
+NEW_PASSWORD='<chosen>' npm run password:set -- --username anjali
+```
+
+`--random` generates the password, prints it once and requires the holder to
+replace it at first sign-in. Use it for accounts you hand to someone else; set
+`NEW_PASSWORD` for your own.
+
+Verify nothing is left on the shared password by signing in with
+`Valmiki@2026` — it must fail for every account.
+
+Be aware of what sharing one database means: local development then runs against
+live school data. Point `.env` at production only for the commands above, and
+keep a separate `.env` for day-to-day work.
+
 ## 4 · API on Render
 
 New → Blueprint → point at this repository. `render.yaml` supplies the build

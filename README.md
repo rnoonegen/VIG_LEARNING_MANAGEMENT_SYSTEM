@@ -87,6 +87,7 @@ and sign-in and media return a clear `503` rather than crashing.
 | `npm run db:pull` | Re-sync `schema.prisma` + client from the live database |
 | `npm run db:seed` / `db:studio` | Seed demo data · browse the database |
 | `npm run admin:create` | Create one administrator — the production bootstrap |
+| `npm run password:set` | Set or regenerate one account's password |
 | `npm run icons` | Regenerate PWA icons |
 | `npm run grep:ai` | List every `TODO(AI-PHASE-2)` seam |
 
