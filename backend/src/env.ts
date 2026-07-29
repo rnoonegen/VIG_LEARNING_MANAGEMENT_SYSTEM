@@ -11,7 +11,9 @@ config({ path: path.resolve(here, '../../.env') });
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(4000),
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  // Comma-separated list of browser origins allowed to call this API. In
+  // production that is the deployed site's URL — deployed sites have no port.
+  CORS_ORIGIN: z.string().default('http://localhost:3000'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required — copy .env.example to .env'),
 
   SUPABASE_URL: z.string().url().optional(),

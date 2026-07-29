@@ -234,7 +234,7 @@ if (SKIP_SEED) {
 
 console.log(`\n${c.green}${c.bold}Setup complete.${c.reset}\n`);
 console.log(`  Start the app:   ${c.bold}npm run dev${c.reset}`);
-console.log(`  Frontend:        http://localhost:5173`);
+console.log(`  Frontend:        http://localhost:3000`);
 console.log(`  API health:      http://localhost:4000/api/v1/health\n`);
 
 if (!SKIP_SEED) {

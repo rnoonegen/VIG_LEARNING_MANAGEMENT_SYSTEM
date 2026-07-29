@@ -39,7 +39,7 @@ Requires Node ≥ 20.
 npm install
 cp .env.example .env      # then fill in the values below
 npm run setup             # applies the SQL schema, syncs Prisma, seeds demo data
-npm run dev               # backend :4000 · frontend :5173
+npm run dev               # backend :4000 · frontend :3000
 ```
 
 `npm run setup` is preflight-checked and safe to re-run. It applies

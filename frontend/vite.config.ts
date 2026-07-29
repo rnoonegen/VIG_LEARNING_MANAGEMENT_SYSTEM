@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_API_URL': JSON.stringify(env.VITE_API_URL ?? 'http://localhost:4000/api/v1'),
     },
     server: {
-      port: 5173,
+      port: 3000,
       strictPort: false,
     },
   };
