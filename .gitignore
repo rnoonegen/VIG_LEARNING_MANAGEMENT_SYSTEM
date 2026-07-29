@@ -1,8 +1,11 @@
 node_modules/
 dist/
 build/
+# Every env file is secret except the template. Covers .env.production,
+# .env.dev and anything else added while juggling environments.
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 .DS_Store
 frontend/dist/
