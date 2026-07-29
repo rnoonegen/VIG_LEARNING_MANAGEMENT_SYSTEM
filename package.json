@@ -24,6 +24,7 @@
     "db:pull": "prisma db pull --schema database/schema.prisma && prisma generate --schema database/schema.prisma",
     "db:studio": "prisma studio --schema database/schema.prisma",
     "db:seed": "tsx database/seed.ts",
+    "admin:create": "tsx scripts/create-admin.mts",
     "grep:ai": "node -e \"const{execSync}=require('child_process');try{console.log(execSync('git grep -n \\\"TODO(AI-PHASE-2)\\\"').toString())}catch{console.log('none found')}\""
   },
   "prisma": {

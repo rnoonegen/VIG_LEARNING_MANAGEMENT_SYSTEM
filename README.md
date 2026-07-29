@@ -86,8 +86,24 @@ and sign-in and media return a clear `503` rather than crashing.
 | `npm run schema:apply` | Apply `database/supabase/schema/*.sql` in order |
 | `npm run db:pull` | Re-sync `schema.prisma` + client from the live database |
 | `npm run db:seed` / `db:studio` | Seed demo data · browse the database |
+| `npm run admin:create` | Create one administrator — the production bootstrap |
 | `npm run icons` | Regenerate PWA icons |
 | `npm run grep:ai` | List every `TODO(AI-PHASE-2)` seam |
+
+---
+
+## Deployment
+
+Supabase for Postgres, Auth and Storage · Render for the API · Vercel for the
+web app. `render.yaml` and `vercel.json` configure both hosts from this
+repository, and `.github/workflows/` typecheck, test and deploy on push.
+
+Full runbook, including the exact GitHub secrets to add:
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+> `npm run db:seed` creates demo accounts on a shared password that is public in
+> this repository. Never run it against production — use `npm run admin:create`
+> to bootstrap a single real administrator instead.
 
 ---
 

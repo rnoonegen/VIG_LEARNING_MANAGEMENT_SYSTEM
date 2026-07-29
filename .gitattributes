@@ -1,0 +1,8 @@
+# One canonical line ending in the repository regardless of who commits.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.webmanifest text eol=lf

@@ -1,0 +1,48 @@
+# Render blueprint for the API.
+#
+# Point Render at this repository and it reads this file — no manual service
+# configuration. Values marked `sync: false` are deliberately not stored here:
+# Render prompts for them once, so credentials never enter version control.
+#
+# Two things this file encodes that are easy to get wrong by hand:
+#   1. Install runs with dev dependencies. The Prisma CLI lives there, and the
+#      client must be generated during the build or every query fails.
+#   2. The install happens at the repository root, not in backend/. That is what
+#      resolves the @vig/shared workspace link the API imports.
+services:
+  - type: web
+    name: vig-lms-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: npm ci --include=dev && npx prisma generate --schema database/schema.prisma
+    startCommand: npm run start -w @vig/backend
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SCHOOL_TIMEZONE
+        value: Asia/Kolkata
+      - key: SUPABASE_STORAGE_BUCKET
+        value: moments
+      - key: FEATURE_WEB_PUSH
+        value: "false"
+      # Must match the value the accounts were created with — it forms each
+      # user's login alias, so changing it locks everyone out.
+      - key: AUTH_EMAIL_DOMAIN
+        value: users.valmiki.internal
+      # Supplied once in the Render dashboard.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # The deployed frontend origin. Comma-separate to allow more than one.
+      - key: CORS_ORIGIN
+        sync: false
