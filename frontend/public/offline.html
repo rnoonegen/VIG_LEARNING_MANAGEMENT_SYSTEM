@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#5B2CCB" />
+    <title>You're offline · Valmiki LMS System</title>
+    <style>
+      :root {
+        --violet: #5b2ccb;
+        --navy: #11165c;
+        --ink-2: #5f6080;
+        --canvas: #fcfbff;
+        --card: #ffffff;
+        --border: #e7e3f0;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--canvas);
+        color: var(--navy);
+        font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+      }
+      .card {
+        max-width: 24rem;
+        width: 100%;
+        text-align: center;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 40px 24px;
+      }
+      .mark {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 20px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        background: #f3eeff;
+        font-size: 28px;
+      }
+      h1 {
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 24px;
+        line-height: 1.2;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 14px;
+        line-height: 1.45;
+        color: var(--ink-2);
+        margin: 0 0 24px;
+      }
+      button {
+        font: inherit;
+        font-weight: 600;
+        font-size: 14px;
+        color: #fff;
+        background: var(--violet);
+        border: 0;
+        border-radius: 12px;
+        padding: 12px 24px;
+        min-height: 44px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #4b22b5;
+      }
+      .note {
+        margin: 20px 0 0;
+        font-size: 12px;
+        color: #8d8da5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="mark" aria-hidden="true">☁</div>
+      <h1>You're offline</h1>
+      <p>Check your internet connection and try again.</p>
+      <button type="button" onclick="location.reload()">Retry</button>
+      <!-- Flow 04 locks this: never imply that offline editing is supported. -->
+      <p class="note">Work offline is not saved. Reconnect to continue.</p>
+    </div>
+  </body>
+</html>

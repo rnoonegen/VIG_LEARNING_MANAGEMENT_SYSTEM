@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    // No baseUrl: `paths` resolves relative to this file, and setting baseUrl
+    // would also make bare imports resolve against the project root, letting a
+    // local folder (public/, scripts/, dist/) shadow a real npm package.
+    // Vite resolves `@/` for real via the alias in vite.config.ts.
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+}

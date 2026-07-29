@@ -1,0 +1,42 @@
+{
+  "name": "vig-lms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Valmiki LMS System — homeschool learning portal for Valmiki International Gurukulam",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend",
+    "database"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w @vig/backend\" \"npm run dev -w @vig/frontend\"",
+    "dev:backend": "npm run dev -w @vig/backend",
+    "dev:frontend": "npm run dev -w @vig/frontend",
+    "build": "npm run build -w @vig/frontend",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "setup": "node scripts/setup.mjs",
+    "setup:check": "node scripts/setup.mjs --check",
+    "schema:apply": "node scripts/apply-sql-schema.mjs",
+    "icons": "node frontend/scripts/generate-icons.mjs",
+    "db:generate": "prisma generate --schema database/schema.prisma",
+    "db:pull": "prisma db pull --schema database/schema.prisma && prisma generate --schema database/schema.prisma",
+    "db:studio": "prisma studio --schema database/schema.prisma",
+    "db:seed": "tsx database/seed.ts",
+    "grep:ai": "node -e \"const{execSync}=require('child_process');try{console.log(execSync('git grep -n \\\"TODO(AI-PHASE-2)\\\"').toString())}catch{console.log('none found')}\""
+  },
+  "prisma": {
+    "schema": "database/schema.prisma",
+    "seed": "tsx database/seed.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prisma": "^6.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

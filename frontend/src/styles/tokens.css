@@ -1,0 +1,138 @@
+@import 'tailwindcss';
+
+/**
+ * Design System §14 → Tailwind v4 theme.
+ *
+ * Every colour, radius and font in the product resolves to one of these tokens.
+ * Spacing uses Tailwind's native 4px scale (space.1 → p-1 … space.12 → p-12), so
+ * no custom spacing tokens are needed.
+ */
+@theme {
+  --color-navy: #11165c;
+  --color-violet: #5b2ccb;
+  --color-violet-hover: #4b22b5;
+
+  --color-canvas: #fcfbff;
+  --color-card: #ffffff;
+  --color-lavender: #f3eeff;
+  --color-lavender-2: #faf8ff;
+  --color-line: #e7e3f0;
+
+  --color-ink: #11165c;
+  --color-ink-2: #5f6080;
+  --color-ink-3: #8d8da5;
+
+  --color-success: #3fa45b;
+  --color-success-bg: #edf8ef;
+  --color-info: #3f83e8;
+  --color-info-bg: #edf5ff;
+  --color-warning: #f29a38;
+  --color-warning-bg: #fff5e8;
+  --color-danger: #f05b5b;
+  --color-danger-bg: #fff0f0;
+  --color-pink: #e95d86;
+  --color-pink-bg: #fff1f6;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-pill: 999px;
+
+  /* The serif carries the editorial warmth; the sans keeps dense UI legible.
+     Aptos is not reliably available on the web, so Inter stands in (Q14). */
+  --font-display: Georgia, 'Times New Roman', serif;
+  --font-sans: Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Serif is reserved for display and headings. Never for table cells,
+     dense labels or metadata (Design System §12). */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    color: var(--color-ink);
+    font-weight: 600;
+    margin: 0;
+  }
+
+  h1 {
+    font-size: 28px;
+    line-height: 1.15;
+  }
+  h2 {
+    font-size: 22px;
+    line-height: 1.2;
+  }
+  h3 {
+    font-size: 18px;
+    line-height: 1.25;
+  }
+
+  @media (min-width: 768px) {
+    h1 {
+      font-size: 34px;
+    }
+    h2 {
+      font-size: 26px;
+    }
+    h3 {
+      font-size: 20px;
+    }
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* Visible focus in violet everywhere, per the accessibility rules. */
+  :focus-visible {
+    outline: 2px solid var(--color-violet);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::placeholder {
+    color: var(--color-ink-3);
+  }
+}
+
+@layer utilities {
+  /* Dense administrative rows may look small, but their hit area must not be. */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .card-surface {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+  }
+
+  /* Wide content scrolls inside its own container; the page never scrolls sideways. */
+  .scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

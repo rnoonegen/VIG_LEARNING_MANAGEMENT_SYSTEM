@@ -1,0 +1,521 @@
+/**
+ * Demo seed for the Valmiki LMS System.
+ *
+ * Runs in two phases:
+ *
+ *   1. Reference data — school settings, development areas and the curriculum.
+ *      Needs only the database.
+ *   2. Demo data — accounts, students, a timetable and one fully saved class
+ *      record that flows through to a parent weekly update. Needs Supabase Auth,
+ *      because every account is a real Supabase user.
+ *
+ * If Supabase is not configured the script still seeds phase 1 and explains what
+ * is missing, so schema work is never blocked on credentials.
+ *
+ * Usage: npm run db:seed
+ */
+
+import { PrismaClient, type Prisma } from '@prisma/client';
+import { SEED_DEVELOPMENT_AREAS, addDays, startOfWeek } from '@vig/shared';
+import { env, supabaseConfigured } from '../backend/src/env.js';
+import { supabaseAdmin, usernameToEmail } from '../backend/src/lib/supabase.js';
+
+const prisma = new PrismaClient();
+
+/**
+ * Demo accounts share one password so the prototype can be explored immediately.
+ * They are created with must_change_password = false for that reason; accounts
+ * created through the UI still go through the forced-replacement gate (F1).
+ */
+const DEMO_PASSWORD = 'Valmiki@2026';
+
+// ---------------------------------------------------------------------------
+// Phase 1 — reference data
+// ---------------------------------------------------------------------------
+
+async function seedSchoolSettings() {
+  await prisma.schoolSettings.upsert({
+    where: { id: 1 },
+    create: { id: 1, name: 'Valmiki International Gurukulam', timezone: env.SCHOOL_TIMEZONE },
+    update: { timezone: env.SCHOOL_TIMEZONE },
+  });
+  console.log('  · school settings');
+}
+
+async function seedDevelopmentAreas() {
+  for (const [index, area] of SEED_DEVELOPMENT_AREAS.entries()) {
+    await prisma.developmentArea.upsert({
+      where: { category_name: { category: area.category, name: area.name } },
+      create: { ...area, displayOrder: index },
+      update: { description: area.description },
+    });
+  }
+  console.log(`  · ${SEED_DEVELOPMENT_AREAS.length} development areas`);
+}
+
+/** Subject → levels → topics → skills, following the supplied boards. */
+const CURRICULUM: Array<{
+  name: string;
+  colorToken: string;
+  levels: Array<{ name: string; topics?: Array<{ name: string; skills: string[] }> }>;
+}> = [
+  {
+    name: 'Mathematics',
+    colorToken: 'violet',
+    levels: [
+      { name: 'Level 1' },
+      { name: 'Level 2' },
+      { name: 'Level 3' },
+      { name: 'Level 4' },
+      { name: 'Level 5' },
+      {
+        name: 'Level 6',
+        topics: [
+          {
+            name: 'Fractions',
+            skills: [
+              'Equivalent fractions',
+              'Adding unlike fractions',
+              'Subtracting fractions',
+              'Multiplying fractions',
+            ],
+          },
+          { name: 'Decimals', skills: ['Place value to thousandths', 'Comparing decimals', 'Rounding decimals'] },
+          { name: 'Geometry', skills: ['Angles and lines', 'Area of rectangles', 'Perimeter', 'Symmetry'] },
+          { name: 'Ratio & Proportion', skills: ['Simplifying ratios', 'Unit rates', 'Scaling quantities'] },
+        ],
+      },
+      { name: 'Level 7' },
+    ],
+  },
+  {
+    name: 'English',
+    colorToken: 'orange',
+    levels: [
+      { name: 'Level 3' },
+      { name: 'Level 4' },
+      {
+        name: 'Level 5',
+        topics: [
+          { name: 'Paragraph Writing', skills: ['Topic sentences', 'Supporting detail', 'Concluding sentences'] },
+          { name: 'Reading Comprehension', skills: ['Main idea', 'Inference', 'Vocabulary in context'] },
+        ],
+      },
+      { name: 'Level 6' },
+    ],
+  },
+  {
+    name: 'Science',
+    colorToken: 'blue',
+    levels: [
+      { name: 'Level 3' },
+      {
+        name: 'Level 4',
+        topics: [
+          { name: 'Materials & Properties', skills: ['States of matter', 'Mixtures and solutions', 'Reversible change'] },
+          { name: 'Living Things', skills: ['Life cycles', 'Habitats'] },
+        ],
+      },
+      { name: 'Level 5' },
+    ],
+  },
+  {
+    name: 'Telugu',
+    colorToken: 'green',
+    levels: [
+      { name: 'Level 3' },
+      {
+        name: 'Level 4',
+        topics: [{ name: 'Reading & Vocabulary', skills: ['Reading aloud', 'Everyday vocabulary'] }],
+      },
+    ],
+  },
+];
+
+async function seedCurriculum() {
+  for (const [subjectOrder, subjectSpec] of CURRICULUM.entries()) {
+    const subject = await prisma.subject.upsert({
+      where: { name: subjectSpec.name },
+      create: { name: subjectSpec.name, colorToken: subjectSpec.colorToken, displayOrder: subjectOrder },
+      update: { colorToken: subjectSpec.colorToken },
+    });
+
+    for (const [levelOrder, levelSpec] of subjectSpec.levels.entries()) {
+      const level = await prisma.level.upsert({
+        where: { subjectId_name: { subjectId: subject.id, name: levelSpec.name } },
+        create: { subjectId: subject.id, name: levelSpec.name, displayOrder: levelOrder },
+        update: { displayOrder: levelOrder },
+      });
+
+      for (const [topicOrder, topicSpec] of (levelSpec.topics ?? []).entries()) {
+        const existingTopic = await prisma.topic.findFirst({
+          where: { levelId: level.id, name: topicSpec.name },
+        });
+        const topic =
+          existingTopic ??
+          (await prisma.topic.create({
+            data: { levelId: level.id, name: topicSpec.name, displayOrder: topicOrder },
+          }));
+
+        for (const [skillOrder, skillName] of topicSpec.skills.entries()) {
+          const existingSkill = await prisma.skill.findFirst({
+            where: { topicId: topic.id, name: skillName },
+          });
+          if (!existingSkill) {
+            await prisma.skill.create({
+              data: { topicId: topic.id, name: skillName, displayOrder: skillOrder },
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const [subjects, skills] = await Promise.all([prisma.subject.count(), prisma.skill.count()]);
+  console.log(`  · ${subjects} subjects, ${skills} skills`);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — demo accounts and the full information cycle
+// ---------------------------------------------------------------------------
+
+type Role = 'ADMIN' | 'TEACHER' | 'PARENT';
+
+/** Creates (or reuses) a Supabase Auth user and the matching local row. */
+async function ensureUser(username: string, fullName: string, role: Role) {
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) return existing;
+
+  const email = usernameToEmail(username);
+  const admin = supabaseAdmin();
+
+  let authId: string;
+  const created = await admin.auth.admin.createUser({
+    email,
+    password: DEMO_PASSWORD,
+    email_confirm: true,
+    user_metadata: { username, full_name: fullName },
+  });
+
+  if (created.data.user) {
+    authId = created.data.user.id;
+  } else {
+    // The auth user may survive a previous partial run; find and reuse it.
+    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const match = list?.users.find((u) => u.email === email);
+    if (!match) throw new Error(`Could not create or find the auth user for ${username}: ${created.error?.message}`);
+    await admin.auth.admin.updateUserById(match.id, { password: DEMO_PASSWORD });
+    authId = match.id;
+  }
+
+  const user = await prisma.user.create({
+    data: { id: authId, username, emailAlias: email, role, fullName, mustChangePassword: false },
+  });
+
+  if (role === 'TEACHER') await prisma.teacher.create({ data: { userId: user.id } });
+  if (role === 'PARENT') await prisma.parent.create({ data: { userId: user.id } });
+
+  return user;
+}
+
+const WEEKDAYS = [1, 2, 3, 4, 5];
+
+function weekWindows(startTime: string, endTime: string) {
+  return WEEKDAYS.map((weekday) => ({ weekday, startTime, endTime }));
+}
+
+async function seedDemo() {
+  // --- Accounts ------------------------------------------------------------
+  const adminUser = await ensureUser('anjali', 'Anjali Rao', 'ADMIN');
+  const priyaUser = await ensureUser('priya', 'Priya Sharma', 'TEACHER');
+  const meeraUser = await ensureUser('meera', 'Meera Reddy', 'TEACHER');
+  const parentUser = await ensureUser('ananya', 'Ananya Sharma', 'PARENT');
+  console.log('  · 4 accounts (admin, 2 teachers, 1 parent)');
+
+  const priya = await prisma.teacher.findUniqueOrThrow({ where: { userId: priyaUser.id } });
+  const meera = await prisma.teacher.findUniqueOrThrow({ where: { userId: meeraUser.id } });
+  const parent = await prisma.parent.findUniqueOrThrow({ where: { userId: parentUser.id } });
+
+  // --- Teaching capabilities & availability --------------------------------
+  const maths = await prisma.subject.findUniqueOrThrow({ where: { name: 'Mathematics' } });
+  const english = await prisma.subject.findUniqueOrThrow({ where: { name: 'English' } });
+  const science = await prisma.subject.findUniqueOrThrow({ where: { name: 'Science' } });
+
+  const capabilities: Array<{ teacherId: string; subjectId: string; min: number; max: number; primary: boolean }> = [
+    { teacherId: priya.id, subjectId: maths.id, min: 4, max: 6, primary: true },
+    { teacherId: priya.id, subjectId: science.id, min: 0, max: 2, primary: false },
+    { teacherId: meera.id, subjectId: english.id, min: 0, max: 3, primary: true },
+  ];
+
+  for (const cap of capabilities) {
+    await prisma.teacherCapability.upsert({
+      where: { teacherId_subjectId: { teacherId: cap.teacherId, subjectId: cap.subjectId } },
+      create: {
+        teacherId: cap.teacherId,
+        subjectId: cap.subjectId,
+        minLevelOrder: cap.min,
+        maxLevelOrder: cap.max,
+        isPrimary: cap.primary,
+      },
+      update: {},
+    });
+  }
+
+  for (const teacher of [priya, meera]) {
+    const count = await prisma.teacherAvailability.count({ where: { teacherId: teacher.id } });
+    if (count === 0) {
+      await prisma.teacherAvailability.createMany({
+        data: weekWindows('08:30', '14:30').map((w) => ({ ...w, teacherId: teacher.id })),
+      });
+    }
+  }
+  console.log('  · teaching capabilities and weekly availability');
+
+  // --- Students -------------------------------------------------------------
+  const mathsL6 = await prisma.level.findUniqueOrThrow({
+    where: { subjectId_name: { subjectId: maths.id, name: 'Level 6' } },
+  });
+  const englishL5 = await prisma.level.findUniqueOrThrow({
+    where: { subjectId_name: { subjectId: english.id, name: 'Level 5' } },
+  });
+  const scienceL4 = await prisma.level.findUniqueOrThrow({
+    where: { subjectId_name: { subjectId: science.id, name: 'Level 4' } },
+  });
+
+  const studentSpecs = [
+    { fullName: 'Aarav Sharma', gradeLabel: '5th Grade', linkParent: true },
+    { fullName: 'Diya Rao', gradeLabel: '5th Grade', linkParent: false },
+    { fullName: 'Kabir Singh', gradeLabel: '4th Grade', linkParent: false },
+  ];
+
+  const students = [];
+  for (const spec of studentSpecs) {
+    let student = await prisma.student.findFirst({ where: { fullName: spec.fullName } });
+    if (!student) {
+      student = await prisma.student.create({
+        data: { fullName: spec.fullName, gradeLabel: spec.gradeLabel, joinedAt: new Date() },
+      });
+
+      await prisma.studentSubjectLevel.createMany({
+        data: [
+          { studentId: student.id, subjectId: maths.id, levelId: mathsL6.id },
+          { studentId: student.id, subjectId: english.id, levelId: englishL5.id },
+          { studentId: student.id, subjectId: science.id, levelId: scienceL4.id },
+        ],
+      });
+
+      await prisma.studentAvailability.createMany({
+        data: weekWindows('09:00', '15:00').map((w) => ({ ...w, studentId: student!.id })),
+      });
+
+      if (spec.linkParent) {
+        await prisma.parentStudent.create({
+          data: { parentId: parent.id, studentId: student.id, relationship: 'Mother' },
+        });
+      }
+    }
+    students.push(student);
+  }
+  console.log(`  · ${students.length} students with levels, availability and parent access`);
+
+  // --- A recurring class, starting last Monday so there is history ----------
+  const lastMonday = addDays(startOfWeek(new Date(), 1), -7);
+  const startTime = '09:00';
+  const durationMinutes = 60;
+
+  let mathsClass = await prisma.class.findFirst({
+    where: { subjectId: maths.id, teacherId: priya.id, levelId: mathsL6.id },
+  });
+
+  if (!mathsClass) {
+    mathsClass = await prisma.class.create({
+      data: {
+        subjectId: maths.id,
+        levelId: mathsL6.id,
+        teacherId: priya.id,
+        daysOfWeek: [1, 3],
+        startTime,
+        durationMinutes,
+        startDate: lastMonday,
+        timezone: env.SCHOOL_TIMEZONE,
+        createdBy: adminUser.id,
+        students: { create: students.slice(0, 2).map((s) => ({ studentId: s.id })) },
+      },
+    });
+  }
+
+  // Materialise occurrences across the whole demo window, past and future.
+  const occurrenceData: Prisma.ClassOccurrenceCreateManyInput[] = [];
+  for (let offset = 0; offset < 60; offset += 1) {
+    const day = addDays(lastMonday, offset);
+    if (!mathsClass.daysOfWeek.includes(day.getUTCDay())) continue;
+
+    const start = new Date(day);
+    start.setUTCHours(Number(startTime.slice(0, 2)), Number(startTime.slice(3)), 0, 0);
+    const end = new Date(start.getTime() + durationMinutes * 60_000);
+
+    occurrenceData.push({
+      classId: mathsClass.id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      teacherId: priya.id,
+    });
+  }
+  await prisma.classOccurrence.createMany({ data: occurrenceData, skipDuplicates: true });
+  console.log(`  · 1 recurring class, ${occurrenceData.length} occurrences materialised`);
+
+  // --- One class fully recorded, so the cycle is visible end to end ---------
+  const pastOccurrence = await prisma.classOccurrence.findFirst({
+    where: { classId: mathsClass.id, scheduledEnd: { lt: new Date() } },
+    orderBy: { scheduledStart: 'desc' },
+    include: { class: { include: { students: true } }, classRecord: true },
+  });
+
+  if (pastOccurrence && !pastOccurrence.classRecord) {
+    const roster = pastOccurrence.class.students.map((cs) => cs.studentId);
+    const aarav = students[0]!;
+
+    const skill = await prisma.skill.findFirstOrThrow({
+      where: { name: 'Adding unlike fractions' },
+    });
+    const confidence = await prisma.developmentArea.findFirstOrThrow({ where: { name: 'Confidence' } });
+
+    const observedOn = new Date(pastOccurrence.scheduledStart);
+    observedOn.setUTCHours(0, 0, 0, 0);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.attendance.createMany({
+        data: roster.map((studentId) => ({
+          occurrenceId: pastOccurrence.id,
+          studentId,
+          status: 'PRESENT' as const,
+        })),
+        skipDuplicates: true,
+      });
+
+      const record = await tx.classRecord.create({
+        data: {
+          occurrenceId: pastOccurrence.id,
+          authorId: priyaUser.id,
+          overallClassNote:
+            'Worked on adding unlike fractions using visual models, then moved to independent practice. The group found common denominators more comfortably than last week.',
+          status: 'SAVED',
+          savedAt: new Date(),
+          observations: {
+            create: [
+              {
+                studentId: aarav.id,
+                observation:
+                  'Understood the common denominator quickly and solved the first four examples independently.',
+              },
+              {
+                studentId: roster[1] ?? aarav.id,
+                observation: 'Understood the concept but needed prompting on the word problem.',
+              },
+            ],
+          },
+        },
+      });
+
+      await tx.learningUpdate.create({
+        data: {
+          studentId: aarav.id,
+          skillId: skill.id,
+          previousStatus: 'LEARNING',
+          newStatus: 'MASTERED',
+          note: 'Solved four examples independently without prompting.',
+          source: 'CLASS_RECORD',
+          classRecordId: record.id,
+          authorId: priyaUser.id,
+        },
+      });
+
+      await tx.studentSkillProgress.upsert({
+        where: { studentId_skillId: { studentId: aarav.id, skillId: skill.id } },
+        create: { studentId: aarav.id, skillId: skill.id, status: 'MASTERED', updatedBy: priyaUser.id },
+        update: { status: 'MASTERED', updatedBy: priyaUser.id },
+      });
+
+      await tx.developmentObservation.create({
+        data: {
+          studentId: aarav.id,
+          areaId: confidence.id,
+          observation: 'Volunteered to explain his solution method to the group without being asked.',
+          observedOn,
+          observerId: priyaUser.id,
+          classRecordId: record.id,
+          source: 'CLASS_RECORD',
+        },
+      });
+
+      await tx.studentDevelopmentArea.upsert({
+        where: { studentId_areaId: { studentId: aarav.id, areaId: confidence.id } },
+        create: { studentId: aarav.id, areaId: confidence.id, currentStage: 'DEVELOPING' },
+        update: { currentStage: 'DEVELOPING' },
+      });
+
+      await tx.classOccurrence.update({
+        where: { id: pastOccurrence.id },
+        data: { status: 'COMPLETED' },
+      });
+    });
+
+    console.log('  · 1 saved class record → learning update + development evidence');
+  }
+
+  // --- A teacher exception, to demonstrate grouped Needs Attention ----------
+  const nextFriday = addDays(startOfWeek(new Date(), 1), 11);
+  const hasException = await prisma.teacherAvailabilityException.findFirst({
+    where: { teacherId: priya.id, date: nextFriday },
+  });
+  if (!hasException) {
+    await prisma.teacherAvailabilityException.create({
+      data: {
+        teacherId: priya.id,
+        date: nextFriday,
+        isAvailable: false,
+        allDay: false,
+        startTime: '08:30',
+        endTime: '12:00',
+        reason: 'Personal appointment',
+      },
+    });
+  }
+  console.log('  · 1 teacher availability exception');
+}
+
+// ---------------------------------------------------------------------------
+
+async function main() {
+  console.log('\nSeeding Valmiki LMS System\n');
+
+  console.log('Reference data:');
+  await seedSchoolSettings();
+  await seedDevelopmentAreas();
+  await seedCurriculum();
+
+  if (!supabaseConfigured) {
+    console.log(
+      '\nSkipping demo accounts and the class-record cycle.\n' +
+        'Set SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY in .env,\n' +
+        'then run `npm run db:seed` again to create them.\n',
+    );
+    return;
+  }
+
+  console.log('\nDemo data:');
+  await seedDemo();
+
+  console.log(`\nDone. Sign in with any of these — password: ${DEMO_PASSWORD}\n`);
+  console.log('  anjali  · Admin   · Anjali Rao');
+  console.log('  priya   · Teacher · Priya Sharma');
+  console.log('  meera   · Teacher · Meera Reddy');
+  console.log('  ananya  · Parent  · Ananya Sharma (linked to Aarav Sharma)\n');
+}
+
+main()
+  .catch((err) => {
+    console.error('\nSeed failed:', err);
+    process.exitCode = 1;
+  })
+  .finally(() => prisma.$disconnect());

@@ -1,0 +1,849 @@
+// Valmiki LMS System — Prisma schema
+// Implements §5 of docs/IMPLEMENTATION_PLAN.md.
+//
+// Design notes that apply throughout:
+//  - History tables (learning_updates, development_observations, class_records,
+//    development_stage_changes) are insert-only. Corrections append a new row (BR-09).
+//  - `student_skill_progress` is a projection of `learning_updates`, written in the
+//    same transaction so reads are fast but truth stays replayable.
+//  - Clock times for weekly availability are stored as "HH:MM" strings. They are
+//    wall-clock values in the school timezone with no date component, so a string
+//    avoids the timezone ambiguity that Postgres `time` + Prisma DateTime introduces.
+//  - Absolute instants (occurrences, timestamps) use timestamptz: stored UTC,
+//    rendered in the school timezone (BR-20).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums (§5.1)
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  TEACHER
+  PARENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum CurriculumStatus {
+  ACTIVE
+  REVIEW
+  ARCHIVED
+}
+
+enum SkillStatus {
+  TO_LEARN
+  LEARNING
+  NEEDS_SUPPORT
+  MASTERED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+enum DevCategory {
+  PERSONALITY
+  EMOTIONAL
+  PHYSICAL
+}
+
+enum DevStage {
+  EMERGING
+  DEVELOPING
+  CONSISTENT
+}
+
+enum OccurrenceStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum ClassRecordStatus {
+  DRAFT
+  TRANSCRIBING // TODO(AI-PHASE-2): reached only once STT is wired — see docs/DEFERRED-AI.md §2.3
+  PROCESSING // TODO(AI-PHASE-2): reached only once extraction is wired
+  IN_REVIEW
+  SAVED
+  FAILED
+}
+
+enum UpdateSource {
+  CLASS_RECORD
+  TEACHER_MANUAL
+  ADMIN_MANUAL
+}
+
+enum MomentSource {
+  CLASS_RECORD
+  MANUAL
+}
+
+enum WeeklyUpdateStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum WeeklyUpdateItemType {
+  LEARNING
+  DEVELOPMENT
+  MOMENT
+  CLASS_NOTE
+}
+
+enum NotificationType {
+  WEEKLY_UPDATE_READY
+  SCHEDULE_CHANGED
+  CLASS_RECORD_DUE
+  AVAILABILITY_CONFLICT
+  TEACHER_AVAILABILITY_CHANGE
+  STUDENT_AVAILABILITY_CHANGE
+  INCOMPLETE_SETUP
+  PASSWORD_RESET_REQUEST
+}
+
+enum AttentionType {
+  TEACHER_UNAVAILABLE
+  STUDENT_UNAVAILABLE
+  SCHEDULE_CONFLICT
+  INCOMPLETE_STUDENT_SETUP
+  CLASS_RECORD_OVERDUE
+  SETUP_INCOMPLETE
+  PASSWORD_RESET_REQUEST
+}
+
+enum AiWorkflow {
+  VOICE_TRANSCRIPTION
+  VOICE_EXTRACTION
+  SCHEDULE_INTERPRET
+  SCHEDULE_CHANGE
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model SchoolSettings {
+  id                   Int      @id @default(1)
+  name                 String   @default("Valmiki International Gurukulam")
+  timezone             String   @default("Asia/Kolkata")
+  weekStartDay         Int      @default(1) // 0 = Sunday
+  weeklyUpdateDay      Int      @default(5) // 5 = Friday
+  weeklyUpdateTime     String   @default("18:00")
+  aiMonthlyBudgetCents Int      @default(3000)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(6)
+
+  @@map("school_settings")
+}
+
+model User {
+  // Mirrors the Supabase Auth user id (AD-02/AD-03). Roles and status live here,
+  // never in the token, so a disabled user is rejected on their next request.
+  id                 String     @id @db.Uuid
+  username           String     @unique
+  emailAlias         String     @unique @map("email_alias")
+  role               Role
+  status             UserStatus @default(ACTIVE)
+  fullName           String     @map("full_name")
+  avatarPath         String?    @map("avatar_path")
+  mustChangePassword Boolean    @default(true) @map("must_change_password")
+  language           String     @default("en")
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  teacher             Teacher?
+  parent              Parent?
+  notifications       Notification[]
+  authoredRecords     ClassRecord[]            @relation("ClassRecordAuthor")
+  authoredLearning    LearningUpdate[]         @relation("LearningUpdateAuthor")
+  observedDevelopment DevelopmentObservation[] @relation("DevelopmentObserver")
+  createdMoments      Moment[]                 @relation("MomentCreator")
+  auditEntries        AuditLog[]
+  pushSubscriptions   PushSubscription[]
+
+  @@index([role, status])
+  @@map("users")
+}
+
+/// One row per browser/device a user has granted notification permission on
+/// (D3 / F22). Rows are written now; delivery only happens when
+/// FEATURE_WEB_PUSH is on, so the subscription estate is warm on the day the
+/// flag flips rather than starting empty.
+model PushSubscription {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  /// The browser's push endpoint URL — unique per device, so re-subscribing
+  /// updates the existing row instead of accumulating duplicates.
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  userAgent  String?   @map("user_agent")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model Teacher {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @unique @map("user_id") @db.Uuid
+  notes  String?
+
+  user         User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  capabilities TeacherCapability[]
+  availability TeacherAvailability[]
+  exceptions   TeacherAvailabilityException[]
+  classes      Class[]
+  occurrences  ClassOccurrence[]
+
+  @@map("teachers")
+}
+
+model Parent {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  students ParentStudent[]
+
+  @@map("parents")
+}
+
+model ParentStudent {
+  parentId     String  @map("parent_id") @db.Uuid
+  studentId    String  @map("student_id") @db.Uuid
+  relationship String?
+
+  parent  Parent  @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([parentId, studentId])
+  @@map("parent_students")
+}
+
+model Student {
+  id          String        @id @default(uuid()) @db.Uuid
+  fullName    String        @map("full_name")
+  dateOfBirth DateTime?     @map("date_of_birth") @db.Date
+  gradeLabel  String?       @map("grade_label")
+  joinedAt    DateTime?     @map("joined_at") @db.Date
+  status      StudentStatus @default(ACTIVE)
+  avatarPath  String?       @map("avatar_path")
+  notes       String?
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  parents          ParentStudent[]
+  subjectLevels    StudentSubjectLevel[]
+  availability     StudentAvailability[]
+  skillProgress    StudentSkillProgress[]
+  learningUpdates  LearningUpdate[]
+  levelCompletions LevelCompletion[]
+  classes          ClassStudent[]
+  attendance       Attendance[]
+  observations     StudentObservation[]
+  developmentAreas StudentDevelopmentArea[]
+  developmentObs   DevelopmentObservation[]
+  stageChanges     DevelopmentStageChange[]
+  moments          MomentStudent[]
+  weeklyUpdates    WeeklyUpdate[]
+
+  @@index([status])
+  @@map("students")
+}
+
+// ---------------------------------------------------------------------------
+// Curriculum — Subject → Level → Topic → Skill (BR-07)
+// ---------------------------------------------------------------------------
+
+model Subject {
+  id           String           @id @default(uuid()) @db.Uuid
+  name         String           @unique
+  colorToken   String           @default("violet") @map("color_token")
+  displayOrder Int              @default(0) @map("display_order")
+  status       CurriculumStatus @default(ACTIVE)
+
+  levels           Level[]
+  capabilities     TeacherCapability[]
+  studentLevels    StudentSubjectLevel[]
+  classes          Class[]
+  levelCompletions LevelCompletion[]
+  moments          Moment[]
+
+  @@map("subjects")
+}
+
+model Level {
+  id           String           @id @default(uuid()) @db.Uuid
+  subjectId    String           @map("subject_id") @db.Uuid
+  name         String
+  displayOrder Int              @default(0) @map("display_order")
+  status       CurriculumStatus @default(ACTIVE)
+
+  subject       Subject               @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topics        Topic[]
+  studentLevels StudentSubjectLevel[]
+  classes       Class[]
+  completedFrom LevelCompletion[]     @relation("FromLevel")
+  completedTo   LevelCompletion[]     @relation("ToLevel")
+
+  @@unique([subjectId, name])
+  @@index([subjectId, displayOrder])
+  @@map("levels")
+}
+
+model Topic {
+  id           String           @id @default(uuid()) @db.Uuid
+  levelId      String           @map("level_id") @db.Uuid
+  name         String
+  displayOrder Int              @default(0) @map("display_order")
+  status       CurriculumStatus @default(ACTIVE)
+
+  level  Level   @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  skills Skill[]
+
+  @@index([levelId, displayOrder])
+  @@map("topics")
+}
+
+model Skill {
+  id           String           @id @default(uuid()) @db.Uuid
+  topicId      String           @map("topic_id") @db.Uuid
+  name         String
+  description  String?
+  learningGoal String?          @map("learning_goal")
+  displayOrder Int              @default(0) @map("display_order")
+  status       CurriculumStatus @default(ACTIVE)
+
+  topic           Topic                  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  studentProgress StudentSkillProgress[]
+  learningUpdates LearningUpdate[]
+
+  @@index([topicId, displayOrder])
+  @@map("skills")
+}
+
+// ---------------------------------------------------------------------------
+// Capability & availability (BR-05, BR-06)
+// ---------------------------------------------------------------------------
+
+model TeacherCapability {
+  id            String  @id @default(uuid()) @db.Uuid
+  teacherId     String  @map("teacher_id") @db.Uuid
+  subjectId     String  @map("subject_id") @db.Uuid
+  minLevelOrder Int     @map("min_level_order")
+  maxLevelOrder Int     @map("max_level_order")
+  isPrimary     Boolean @default(false) @map("is_primary")
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, subjectId])
+  @@map("teacher_capabilities")
+}
+
+model TeacherAvailability {
+  id        String @id @default(uuid()) @db.Uuid
+  teacherId String @map("teacher_id") @db.Uuid
+  weekday   Int // 0 = Sunday … 6 = Saturday
+  startTime String @map("start_time") // "HH:MM" school-local wall clock
+  endTime   String @map("end_time")
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId, weekday])
+  @@map("teacher_availability")
+}
+
+model TeacherAvailabilityException {
+  id          String   @id @default(uuid()) @db.Uuid
+  teacherId   String   @map("teacher_id") @db.Uuid
+  date        DateTime @db.Date
+  isAvailable Boolean  @map("is_available")
+  allDay      Boolean  @default(true) @map("all_day")
+  startTime   String?  @map("start_time")
+  endTime     String?  @map("end_time")
+  reason      String?
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId, date])
+  @@map("teacher_availability_exceptions")
+}
+
+model StudentAvailability {
+  id        String @id @default(uuid()) @db.Uuid
+  studentId String @map("student_id") @db.Uuid
+  weekday   Int
+  startTime String @map("start_time")
+  endTime   String @map("end_time")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, weekday])
+  @@map("student_availability")
+}
+
+// ---------------------------------------------------------------------------
+// Student learning state (BR-07, BR-08, BR-09)
+// ---------------------------------------------------------------------------
+
+model StudentSubjectLevel {
+  id          String    @id @default(uuid()) @db.Uuid
+  studentId   String    @map("student_id") @db.Uuid
+  subjectId   String    @map("subject_id") @db.Uuid
+  levelId     String    @map("level_id") @db.Uuid
+  isCurrent   Boolean   @default(true) @map("is_current")
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  level   Level   @relation(fields: [levelId], references: [id], onDelete: Cascade)
+
+  // "One current level per subject" is a partial-unique constraint, which Prisma
+  // cannot express. StudentService enforces it inside the level-change transaction.
+  @@unique([studentId, subjectId, levelId])
+  @@index([studentId, isCurrent])
+  @@map("student_subject_levels")
+}
+
+model StudentSkillProgress {
+  id        String      @id @default(uuid()) @db.Uuid
+  studentId String      @map("student_id") @db.Uuid
+  skillId   String      @map("skill_id") @db.Uuid
+  status    SkillStatus @default(TO_LEARN)
+  updatedBy String?     @map("updated_by") @db.Uuid
+  updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skill   Skill   @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, skillId])
+  @@map("student_skill_progress")
+}
+
+model LearningUpdate {
+  id             String       @id @default(uuid()) @db.Uuid
+  studentId      String       @map("student_id") @db.Uuid
+  skillId        String       @map("skill_id") @db.Uuid
+  previousStatus SkillStatus? @map("previous_status")
+  newStatus      SkillStatus  @map("new_status")
+  note           String?
+  evidencePath   String?      @map("evidence_path")
+  source         UpdateSource
+  classRecordId  String?      @map("class_record_id") @db.Uuid
+  authorId       String       @map("author_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  student     Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skill       Skill        @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  classRecord ClassRecord? @relation(fields: [classRecordId], references: [id])
+  author      User         @relation("LearningUpdateAuthor", fields: [authorId], references: [id])
+
+  @@index([studentId, createdAt])
+  @@index([classRecordId])
+  @@map("learning_updates")
+}
+
+model LevelCompletion {
+  id                     String   @id @default(uuid()) @db.Uuid
+  studentId              String   @map("student_id") @db.Uuid
+  subjectId              String   @map("subject_id") @db.Uuid
+  fromLevelId            String   @map("from_level_id") @db.Uuid
+  toLevelId              String?  @map("to_level_id") @db.Uuid
+  carriedForwardSkillIds String[] @map("carried_forward_skill_ids") @db.Uuid
+  confirmedBy            String   @map("confirmed_by") @db.Uuid
+  confirmedAt            DateTime @default(now()) @map("confirmed_at") @db.Timestamptz(6)
+
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  fromLevel Level   @relation("FromLevel", fields: [fromLevelId], references: [id])
+  toLevel   Level?  @relation("ToLevel", fields: [toLevelId], references: [id])
+
+  @@index([studentId, subjectId])
+  @@map("level_completions")
+}
+
+// ---------------------------------------------------------------------------
+// Scheduling (BR-01, BR-06, BR-12)
+// ---------------------------------------------------------------------------
+
+model Class {
+  id              String           @id @default(uuid()) @db.Uuid
+  subjectId       String           @map("subject_id") @db.Uuid
+  levelId         String           @map("level_id") @db.Uuid
+  teacherId       String           @map("teacher_id") @db.Uuid
+  daysOfWeek      Int[]            @map("days_of_week")
+  startTime       String           @map("start_time") // "HH:MM" school-local
+  durationMinutes Int              @map("duration_minutes")
+  startDate       DateTime         @map("start_date") @db.Date
+  endDate         DateTime?        @map("end_date") @db.Date
+  timezone        String           @default("Asia/Kolkata")
+  status          CurriculumStatus @default(ACTIVE)
+  createdBy       String           @map("created_by") @db.Uuid
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  subject     Subject           @relation(fields: [subjectId], references: [id])
+  level       Level             @relation(fields: [levelId], references: [id])
+  teacher     Teacher           @relation(fields: [teacherId], references: [id])
+  students    ClassStudent[]
+  occurrences ClassOccurrence[]
+
+  @@index([teacherId])
+  @@map("classes")
+}
+
+model ClassStudent {
+  classId   String @map("class_id") @db.Uuid
+  studentId String @map("student_id") @db.Uuid
+
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([classId, studentId])
+  @@map("class_students")
+}
+
+model ClassOccurrence {
+  id              String           @id @default(uuid()) @db.Uuid
+  classId         String           @map("class_id") @db.Uuid
+  scheduledStart  DateTime         @map("scheduled_start") @db.Timestamptz(6)
+  scheduledEnd    DateTime         @map("scheduled_end") @db.Timestamptz(6)
+  // teacherId is snapshotted so a later reassignment never rewrites history (BR-12).
+  teacherId       String           @map("teacher_id") @db.Uuid
+  status          OccurrenceStatus @default(SCHEDULED)
+  cancelledReason String?          @map("cancelled_reason")
+
+  class       Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher     Teacher      @relation(fields: [teacherId], references: [id])
+  attendance  Attendance[]
+  classRecord ClassRecord?
+  moments     Moment[]
+
+  @@unique([classId, scheduledStart])
+  @@index([scheduledStart])
+  @@index([teacherId, scheduledStart])
+  @@map("class_occurrences")
+}
+
+model Attendance {
+  id           String           @id @default(uuid()) @db.Uuid
+  occurrenceId String           @map("occurrence_id") @db.Uuid
+  studentId    String           @map("student_id") @db.Uuid
+  status       AttendanceStatus
+  note         String?
+
+  occurrence ClassOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  student    Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([occurrenceId, studentId])
+  @@map("attendance")
+}
+
+model SchedulingRequest {
+  id          String   @id @default(uuid()) @db.Uuid
+  adminId     String   @map("admin_id") @db.Uuid
+  // Week 1: the structured form payload, stringified.
+  // TODO(AI-PHASE-2): becomes the admin's raw sentence — see docs/DEFERRED-AI.md §2.3
+  rawText     String   @map("raw_text")
+  interpreted Json?
+  status      String   @default("INTERPRETED")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  proposals ScheduleChangeProposal[]
+
+  @@map("scheduling_requests")
+}
+
+model ScheduleChangeProposal {
+  id        String    @id @default(uuid()) @db.Uuid
+  requestId String?   @map("request_id") @db.Uuid
+  moves     Json
+  status    String    @default("PROPOSED")
+  appliedAt DateTime? @map("applied_at") @db.Timestamptz(6)
+  appliedBy String?   @map("applied_by") @db.Uuid
+
+  request SchedulingRequest? @relation(fields: [requestId], references: [id])
+
+  @@map("schedule_change_proposals")
+}
+
+// ---------------------------------------------------------------------------
+// Class record — the anchor for everything post-class (BR-01, BR-02, BR-19)
+// ---------------------------------------------------------------------------
+
+model ClassRecord {
+  id               String            @id @default(uuid()) @db.Uuid
+  occurrenceId     String            @unique @map("occurrence_id") @db.Uuid
+  authorId         String            @map("author_id") @db.Uuid
+  overallClassNote String            @default("") @map("overall_class_note")
+  // The next five columns exist from day one and stay NULL until Phase 2.
+  // TODO(AI-PHASE-2): populated by STT + extraction — see docs/DEFERRED-AI.md §2.3
+  transcript       String?
+  audioPath        String?           @map("audio_path")
+  languageDetected String?           @map("language_detected")
+  aiModel          String?           @map("ai_model")
+  aiCostMicros     Int?              @map("ai_cost_micros")
+  status           ClassRecordStatus @default(DRAFT)
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  savedAt          DateTime?         @map("saved_at") @db.Timestamptz(6)
+
+  occurrence      ClassOccurrence          @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  author          User                     @relation("ClassRecordAuthor", fields: [authorId], references: [id])
+  observations    StudentObservation[]
+  learningUpdates LearningUpdate[]
+  developmentObs  DevelopmentObservation[]
+
+  @@map("class_records")
+}
+
+model StudentObservation {
+  id            String  @id @default(uuid()) @db.Uuid
+  classRecordId String  @map("class_record_id") @db.Uuid
+  studentId     String  @map("student_id") @db.Uuid
+  observation   String
+  // TODO(AI-PHASE-2): true for model-authored text — see docs/DEFERRED-AI.md §2.2
+  isAiGenerated Boolean @default(false) @map("is_ai_generated")
+  wasEdited     Boolean @default(false) @map("was_edited")
+
+  classRecord ClassRecord @relation(fields: [classRecordId], references: [id], onDelete: Cascade)
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([classRecordId, studentId])
+  @@map("student_observations")
+}
+
+// ---------------------------------------------------------------------------
+// Development — evidence over time, never a score (BR-10)
+// ---------------------------------------------------------------------------
+
+model DevelopmentArea {
+  id           String           @id @default(uuid()) @db.Uuid
+  category     DevCategory
+  name         String
+  description  String?
+  displayOrder Int              @default(0) @map("display_order")
+  status       CurriculumStatus @default(ACTIVE)
+
+  studentAreas StudentDevelopmentArea[]
+  observations DevelopmentObservation[]
+  stageChanges DevelopmentStageChange[]
+
+  @@unique([category, name])
+  @@map("development_areas")
+}
+
+model StudentDevelopmentArea {
+  id           String   @id @default(uuid()) @db.Uuid
+  studentId    String   @map("student_id") @db.Uuid
+  areaId       String   @map("area_id") @db.Uuid
+  currentStage DevStage @default(EMERGING) @map("current_stage")
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  student Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  area    DevelopmentArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, areaId])
+  @@map("student_development_areas")
+}
+
+model DevelopmentObservation {
+  id            String       @id @default(uuid()) @db.Uuid
+  studentId     String       @map("student_id") @db.Uuid
+  areaId        String       @map("area_id") @db.Uuid
+  observation   String
+  observedOn    DateTime     @map("observed_on") @db.Date
+  observerId    String       @map("observer_id") @db.Uuid
+  classRecordId String?      @map("class_record_id") @db.Uuid
+  source        UpdateSource
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  student     Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  area        DevelopmentArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  observer    User            @relation("DevelopmentObserver", fields: [observerId], references: [id])
+  classRecord ClassRecord?    @relation(fields: [classRecordId], references: [id])
+
+  @@index([studentId, observedOn])
+  @@index([classRecordId])
+  @@map("development_observations")
+}
+
+model DevelopmentStageChange {
+  id            String   @id @default(uuid()) @db.Uuid
+  studentId     String   @map("student_id") @db.Uuid
+  areaId        String   @map("area_id") @db.Uuid
+  fromStage     DevStage @map("from_stage")
+  toStage       DevStage @map("to_stage")
+  changedBy     String   @map("changed_by") @db.Uuid
+  observationId String?  @map("observation_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  student Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  area    DevelopmentArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, areaId])
+  @@map("development_stage_changes")
+}
+
+// ---------------------------------------------------------------------------
+// Moments — one media object, many student links (BR-11)
+// ---------------------------------------------------------------------------
+
+model Moment {
+  id                String       @id @default(uuid()) @db.Uuid
+  title             String
+  caption           String?
+  subjectId         String?      @map("subject_id") @db.Uuid
+  classOccurrenceId String?      @map("class_occurrence_id") @db.Uuid
+  capturedOn        DateTime     @map("captured_on") @db.Date
+  createdBy         String       @map("created_by") @db.Uuid
+  source            MomentSource @default(MANUAL)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  subject    Subject?         @relation(fields: [subjectId], references: [id])
+  occurrence ClassOccurrence? @relation(fields: [classOccurrenceId], references: [id])
+  creator    User             @relation("MomentCreator", fields: [createdBy], references: [id])
+  media      MomentMedia[]
+  students   MomentStudent[]
+
+  @@index([capturedOn])
+  @@map("moments")
+}
+
+model MomentMedia {
+  id            String  @id @default(uuid()) @db.Uuid
+  momentId      String  @map("moment_id") @db.Uuid
+  storagePath   String  @map("storage_path")
+  thumbnailPath String? @map("thumbnail_path")
+  mimeType      String  @map("mime_type")
+  width         Int?
+  height        Int?
+  durationMs    Int?    @map("duration_ms")
+  sizeBytes     Int?    @map("size_bytes")
+  displayOrder  Int     @default(0) @map("display_order")
+
+  moment Moment @relation(fields: [momentId], references: [id], onDelete: Cascade)
+
+  @@map("moment_media")
+}
+
+model MomentStudent {
+  momentId  String @map("moment_id") @db.Uuid
+  studentId String @map("student_id") @db.Uuid
+
+  moment  Moment  @relation(fields: [momentId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([momentId, studentId])
+  @@map("moment_students")
+}
+
+// ---------------------------------------------------------------------------
+// Parent-facing & system
+// ---------------------------------------------------------------------------
+
+model WeeklyUpdate {
+  id          String             @id @default(uuid()) @db.Uuid
+  studentId   String             @map("student_id") @db.Uuid
+  weekStart   DateTime           @map("week_start") @db.Date
+  weekEnd     DateTime           @map("week_end") @db.Date
+  summaryText String             @default("") @map("summary_text")
+  teacherNote String?            @map("teacher_note")
+  status      WeeklyUpdateStatus @default(DRAFT)
+  generatedAt DateTime           @default(now()) @map("generated_at") @db.Timestamptz(6)
+  publishedAt DateTime?          @map("published_at") @db.Timestamptz(6)
+
+  student Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  items   WeeklyUpdateItem[]
+
+  @@unique([studentId, weekStart])
+  @@map("weekly_updates")
+}
+
+model WeeklyUpdateItem {
+  id             String               @id @default(uuid()) @db.Uuid
+  weeklyUpdateId String               @map("weekly_update_id") @db.Uuid
+  itemType       WeeklyUpdateItemType @map("item_type")
+  refId          String?              @map("ref_id") @db.Uuid
+  highlightText  String               @map("highlight_text")
+  displayOrder   Int                  @default(0) @map("display_order")
+
+  weeklyUpdate WeeklyUpdate @relation(fields: [weeklyUpdateId], references: [id], onDelete: Cascade)
+
+  @@index([weeklyUpdateId, displayOrder])
+  @@map("weekly_update_items")
+}
+
+model Notification {
+  id              String           @id @default(uuid()) @db.Uuid
+  recipientUserId String           @map("recipient_user_id") @db.Uuid
+  type            NotificationType
+  title           String
+  body            String
+  payload         Json?
+  readAt          DateTime?        @map("read_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  recipient User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@index([recipientUserId, createdAt])
+  @@map("notifications")
+}
+
+model AiUsageLog {
+  // Ships now, stays empty until Phase 2.
+  // TODO(AI-PHASE-2): one row per AI call — see docs/DEFERRED-AI.md §2.3
+  id           String     @id @default(uuid()) @db.Uuid
+  workflow     AiWorkflow
+  provider     String
+  model        String
+  inputTokens  Int?       @map("input_tokens")
+  outputTokens Int?       @map("output_tokens")
+  audioSeconds Int?       @map("audio_seconds")
+  costMicros   Int        @default(0) @map("cost_micros")
+  occurrenceId String?    @map("occurrence_id") @db.Uuid
+  userId       String?    @map("user_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("ai_usage_log")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
