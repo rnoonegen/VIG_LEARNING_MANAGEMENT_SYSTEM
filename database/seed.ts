@@ -53,83 +53,65 @@ async function seedDevelopmentAreas() {
   console.log(`  · ${SEED_DEVELOPMENT_AREAS.length} development areas`);
 }
 
-/** Subject → levels → topics → skills, following the supplied boards. */
+/**
+ * Subject → four levels → headings → sub-headings.
+ *
+ * Every subject has L1–L4 and nothing else, matching what the app creates for a
+ * new subject. Headings and sub-headings are normally typed by the admin or the
+ * assigned teacher; a couple are seeded here only so the demo has a class to
+ * record against and something to tick students off with.
+ */
+const DEMO_LEVEL_NAMES = ['L1', 'L2', 'L3', 'L4'];
+
 const CURRICULUM: Array<{
   name: string;
   colorToken: string;
-  levels: Array<{ name: string; topics?: Array<{ name: string; skills: string[] }> }>;
+  /** Which of the four levels carries the demo content, and what it contains. */
+  contentLevel?: { name: string; topics: Array<{ name: string; skills: string[] }> };
 }> = [
   {
     name: 'Mathematics',
     colorToken: 'violet',
-    levels: [
-      { name: 'Level 1' },
-      { name: 'Level 2' },
-      { name: 'Level 3' },
-      { name: 'Level 4' },
-      { name: 'Level 5' },
-      {
-        name: 'Level 6',
-        topics: [
-          {
-            name: 'Fractions',
-            skills: [
-              'Equivalent fractions',
-              'Adding unlike fractions',
-              'Subtracting fractions',
-              'Multiplying fractions',
-            ],
-          },
-          { name: 'Decimals', skills: ['Place value to thousandths', 'Comparing decimals', 'Rounding decimals'] },
-          { name: 'Geometry', skills: ['Angles and lines', 'Area of rectangles', 'Perimeter', 'Symmetry'] },
-          { name: 'Ratio & Proportion', skills: ['Simplifying ratios', 'Unit rates', 'Scaling quantities'] },
-        ],
-      },
-      { name: 'Level 7' },
-    ],
+    contentLevel: {
+      name: 'L3',
+      topics: [
+        {
+          name: 'Fractions',
+          skills: [
+            'Equivalent fractions',
+            'Adding unlike fractions',
+            'Subtracting fractions',
+            'Multiplying fractions',
+          ],
+        },
+        { name: 'Decimals', skills: ['Place value to thousandths', 'Comparing decimals', 'Rounding decimals'] },
+        { name: 'Geometry', skills: ['Angles and lines', 'Area of rectangles', 'Perimeter', 'Symmetry'] },
+      ],
+    },
   },
   {
     name: 'English',
     colorToken: 'orange',
-    levels: [
-      { name: 'Level 3' },
-      { name: 'Level 4' },
-      {
-        name: 'Level 5',
-        topics: [
-          { name: 'Paragraph Writing', skills: ['Topic sentences', 'Supporting detail', 'Concluding sentences'] },
-          { name: 'Reading Comprehension', skills: ['Main idea', 'Inference', 'Vocabulary in context'] },
-        ],
-      },
-      { name: 'Level 6' },
-    ],
+    contentLevel: {
+      name: 'L2',
+      topics: [
+        { name: 'Paragraph Writing', skills: ['Topic sentences', 'Supporting detail', 'Concluding sentences'] },
+        { name: 'Reading Comprehension', skills: ['Main idea', 'Inference', 'Vocabulary in context'] },
+      ],
+    },
   },
   {
     name: 'Science',
     colorToken: 'blue',
-    levels: [
-      { name: 'Level 3' },
-      {
-        name: 'Level 4',
-        topics: [
-          { name: 'Materials & Properties', skills: ['States of matter', 'Mixtures and solutions', 'Reversible change'] },
-          { name: 'Living Things', skills: ['Life cycles', 'Habitats'] },
-        ],
-      },
-      { name: 'Level 5' },
-    ],
+    contentLevel: {
+      name: 'L2',
+      topics: [
+        { name: 'Materials & Properties', skills: ['States of matter', 'Mixtures and solutions', 'Reversible change'] },
+        { name: 'Living Things', skills: ['Life cycles', 'Habitats'] },
+      ],
+    },
   },
-  {
-    name: 'Telugu',
-    colorToken: 'green',
-    levels: [
-      { name: 'Level 3' },
-      {
-        name: 'Level 4',
-        topics: [{ name: 'Reading & Vocabulary', skills: ['Reading aloud', 'Everyday vocabulary'] }],
-      },
-    ],
-  },
+  { name: 'Telugu', colorToken: 'green' },
 ];
 
 async function seedCurriculum() {
@@ -140,14 +122,16 @@ async function seedCurriculum() {
       update: { colorToken: subjectSpec.colorToken },
     });
 
-    for (const [levelOrder, levelSpec] of subjectSpec.levels.entries()) {
+    for (const [levelOrder, levelName] of DEMO_LEVEL_NAMES.entries()) {
       const level = await prisma.level.upsert({
-        where: { subjectId_name: { subjectId: subject.id, name: levelSpec.name } },
-        create: { subjectId: subject.id, name: levelSpec.name, displayOrder: levelOrder },
+        where: { subjectId_name: { subjectId: subject.id, name: levelName } },
+        create: { subjectId: subject.id, name: levelName, displayOrder: levelOrder },
         update: { displayOrder: levelOrder },
       });
 
-      for (const [topicOrder, topicSpec] of (levelSpec.topics ?? []).entries()) {
+      const topics = subjectSpec.contentLevel?.name === levelName ? subjectSpec.contentLevel.topics : [];
+
+      for (const [topicOrder, topicSpec] of topics.entries()) {
         const existingTopic = await prisma.topic.findFirst({
           where: { levelId: level.id, name: topicSpec.name },
         });
@@ -241,9 +225,10 @@ async function seedDemo() {
   const english = await prisma.subject.findUniqueOrThrow({ where: { name: 'English' } });
   const science = await prisma.subject.findUniqueOrThrow({ where: { name: 'Science' } });
 
+  // Ranges are level display orders: 0 = L1 … 3 = L4.
   const capabilities: Array<{ teacherId: string; subjectId: string; min: number; max: number; primary: boolean }> = [
-    { teacherId: priya.id, subjectId: maths.id, min: 4, max: 6, primary: true },
-    { teacherId: priya.id, subjectId: science.id, min: 0, max: 2, primary: false },
+    { teacherId: priya.id, subjectId: maths.id, min: 0, max: 3, primary: true },
+    { teacherId: priya.id, subjectId: science.id, min: 0, max: 1, primary: false },
     { teacherId: meera.id, subjectId: english.id, min: 0, max: 3, primary: true },
   ];
 
@@ -272,14 +257,15 @@ async function seedDemo() {
   console.log('  · teaching capabilities and weekly availability');
 
   // --- Students -------------------------------------------------------------
-  const mathsL6 = await prisma.level.findUniqueOrThrow({
-    where: { subjectId_name: { subjectId: maths.id, name: 'Level 6' } },
+  // The levels carrying demo headings, so the class has something to tick.
+  const mathsLevel = await prisma.level.findUniqueOrThrow({
+    where: { subjectId_name: { subjectId: maths.id, name: 'L3' } },
   });
-  const englishL5 = await prisma.level.findUniqueOrThrow({
-    where: { subjectId_name: { subjectId: english.id, name: 'Level 5' } },
+  const englishLevel = await prisma.level.findUniqueOrThrow({
+    where: { subjectId_name: { subjectId: english.id, name: 'L2' } },
   });
-  const scienceL4 = await prisma.level.findUniqueOrThrow({
-    where: { subjectId_name: { subjectId: science.id, name: 'Level 4' } },
+  const scienceLevel = await prisma.level.findUniqueOrThrow({
+    where: { subjectId_name: { subjectId: science.id, name: 'L2' } },
   });
 
   const studentSpecs = [
@@ -298,9 +284,9 @@ async function seedDemo() {
 
       await prisma.studentSubjectLevel.createMany({
         data: [
-          { studentId: student.id, subjectId: maths.id, levelId: mathsL6.id },
-          { studentId: student.id, subjectId: english.id, levelId: englishL5.id },
-          { studentId: student.id, subjectId: science.id, levelId: scienceL4.id },
+          { studentId: student.id, subjectId: maths.id, levelId: mathsLevel.id },
+          { studentId: student.id, subjectId: english.id, levelId: englishLevel.id },
+          { studentId: student.id, subjectId: science.id, levelId: scienceLevel.id },
         ],
       });
 
@@ -324,14 +310,14 @@ async function seedDemo() {
   const durationMinutes = 60;
 
   let mathsClass = await prisma.class.findFirst({
-    where: { subjectId: maths.id, teacherId: priya.id, levelId: mathsL6.id },
+    where: { subjectId: maths.id, teacherId: priya.id, levelId: mathsLevel.id },
   });
 
   if (!mathsClass) {
     mathsClass = await prisma.class.create({
       data: {
         subjectId: maths.id,
-        levelId: mathsL6.id,
+        levelId: mathsLevel.id,
         teacherId: priya.id,
         daysOfWeek: [1, 3],
         startTime,

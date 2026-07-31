@@ -25,6 +25,8 @@
     "db:studio": "prisma studio --schema database/schema.prisma",
     "db:seed": "tsx database/seed.ts",
     "admin:create": "tsx scripts/create-admin.mts",
+    "curriculum:reset": "tsx scripts/reset-curriculum.mts",
+    "data:reset": "tsx scripts/reset-all.mts",
     "password:set": "tsx scripts/set-password.mts",
     "grep:ai": "node -e \"const{execSync}=require('child_process');try{console.log(execSync('git grep -n \\\"TODO(AI-PHASE-2)\\\"').toString())}catch{console.log('none found')}\""
   },

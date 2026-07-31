@@ -97,7 +97,7 @@ export function TeachersPage() {
                 ) : teacher.availableToday ? (
                   <Pill token="green">Available</Pill>
                 ) : (
-                  <Pill token="muted">Off</Pill>
+                  <Pill token="muted">Unavailable</Pill>
                 )}
                 <ChevronRight size={16} className="shrink-0 text-ink-3" />
               </Link>

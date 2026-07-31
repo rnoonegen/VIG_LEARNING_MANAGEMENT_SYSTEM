@@ -8,14 +8,35 @@ import {
   updateCurriculumNodeSchema,
 } from '@vig/shared';
 import { handler, ok, validateBody } from '../../lib/http.js';
-import { requireRole } from '../../auth/middleware.js';
+import { auth, requireRole } from '../../auth/middleware.js';
+import {
+  assertCanAuthorLevel,
+  assertCanAuthorSkill,
+  assertCanAuthorTopic,
+} from '../../auth/guards.js';
+import { forbidden } from '../../lib/errors.js';
 import * as service from './service.js';
 
 export const curriculumRouter = Router();
 
-// Teachers read the curriculum to pick skills during a class record; only admins
-// shape it (§2 permission matrix).
+/**
+ * Structure is the admin's: subjects and the four levels under each. Content is
+ * the teacher's: the headings and sub-headings for the levels they are assigned.
+ * The per-node guards in auth/guards.ts hold that line.
+ */
 const adminOnly = requireRole('ADMIN');
+
+// --- The whole tree ---------------------------------------------------------
+
+curriculumRouter.get(
+  '/tree',
+  handler(async (req, res) => {
+    const ctx = auth(req);
+    // A teacher's own curriculum view asks for ?mine=true.
+    const onlyMine = req.query.mine === 'true';
+    return ok(res, await service.getTree(ctx, onlyMine));
+  }),
+);
 
 // --- Subjects ---------------------------------------------------------------
 
@@ -33,7 +54,9 @@ curriculumRouter.post(
   '/subjects',
   adminOnly,
   validateBody(createSubjectSchema),
-  handler(async (req, res) => ok(res, await service.createSubject(req.body), undefined, 201)),
+  handler(async (req, res) =>
+    ok(res, await service.createSubject(req.body, auth(req).userId), undefined, 201),
+  ),
 );
 
 curriculumRouter.patch(
@@ -55,11 +78,6 @@ curriculumRouter.post(
 );
 
 curriculumRouter.get(
-  '/levels/:id',
-  handler(async (req, res) => ok(res, await service.getLevel(req.params.id))),
-);
-
-curriculumRouter.get(
   '/levels/:id/skills',
   handler(async (req, res) => ok(res, await service.skillsForLevel(req.params.id))),
 );
@@ -71,43 +89,50 @@ curriculumRouter.patch(
   handler(async (req, res) => ok(res, await service.updateNode('levels', req.params.id, req.body))),
 );
 
-// --- Topics -----------------------------------------------------------------
+// --- Headings ---------------------------------------------------------------
 
 curriculumRouter.post(
   '/levels/:id/topics',
-  adminOnly,
+  requireRole('ADMIN', 'TEACHER'),
   validateBody(createTopicSchema),
-  handler(async (req, res) =>
-    ok(res, await service.createTopic(req.params.id, req.body.name), undefined, 201),
-  ),
-);
-
-curriculumRouter.get(
-  '/topics/:id',
-  handler(async (req, res) => ok(res, await service.getTopic(req.params.id))),
+  handler(async (req, res) => {
+    const ctx = auth(req);
+    await assertCanAuthorLevel(ctx, req.params.id);
+    return ok(res, await service.createTopic(req.params.id, req.body.name, ctx.userId), undefined, 201);
+  }),
 );
 
 curriculumRouter.patch(
   '/topics/:id',
-  adminOnly,
+  requireRole('ADMIN', 'TEACHER'),
   validateBody(updateCurriculumNodeSchema),
-  handler(async (req, res) => ok(res, await service.updateNode('topics', req.params.id, req.body))),
+  handler(async (req, res) => {
+    await assertCanAuthorTopic(auth(req), req.params.id);
+    return ok(res, await service.updateNode('topics', req.params.id, req.body));
+  }),
 );
 
-// --- Skills -----------------------------------------------------------------
+// --- Sub-headings -----------------------------------------------------------
 
 curriculumRouter.post(
   '/topics/:id/skills',
-  adminOnly,
+  requireRole('ADMIN', 'TEACHER'),
   validateBody(createSkillSchema),
-  handler(async (req, res) => ok(res, await service.createSkill(req.params.id, req.body), undefined, 201)),
+  handler(async (req, res) => {
+    const ctx = auth(req);
+    await assertCanAuthorTopic(ctx, req.params.id);
+    return ok(res, await service.createSkill(req.params.id, req.body, ctx.userId), undefined, 201);
+  }),
 );
 
 curriculumRouter.patch(
   '/skills/:id',
-  adminOnly,
+  requireRole('ADMIN', 'TEACHER'),
   validateBody(updateCurriculumNodeSchema),
-  handler(async (req, res) => ok(res, await service.updateNode('skills', req.params.id, req.body))),
+  handler(async (req, res) => {
+    await assertCanAuthorSkill(auth(req), req.params.id);
+    return ok(res, await service.updateNode('skills', req.params.id, req.body));
+  }),
 );
 
 // --- Ordering & archiving ---------------------------------------------------
@@ -130,12 +155,24 @@ curriculumRouter.patch(
   }),
 );
 
+/**
+ * Removing is archiving (BR-17). A sub-heading a child has already been ticked
+ * against cannot be deleted without deleting their history with it, so it is
+ * hidden instead and stays queryable.
+ */
 curriculumRouter.post(
   '/:kind/:id/archive',
-  adminOnly,
+  requireRole('ADMIN', 'TEACHER'),
   handler(async (req, res) => {
     const { kind, id } = req.params;
     if (!isReorderable(kind)) return ok(res, { archived: false });
+
+    const ctx = auth(req);
+    if (kind === 'topics') await assertCanAuthorTopic(ctx, id);
+    else if (kind === 'skills') await assertCanAuthorSkill(ctx, id);
+    // Subjects and levels are structure: admin only.
+    else if (ctx.role !== 'ADMIN') throw forbidden('Only an administrator can remove that.');
+
     return ok(res, await service.archiveNode(kind, id));
   }),
 );

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpRight } from 'lucide-react';
 import type { LevelChangePreviewDto, SkillStatus, SubjectLearningDto } from '@vig/shared';
-import { SKILL_STATUS_META, SKILL_STATUSES } from '@vig/shared';
+import { COVERED_STATUS, isCovered, NOT_COVERED_STATUS, SKILL_STATUS_META } from '@vig/shared';
 import { errorMessage, get, patch, post } from '@/lib/api';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
@@ -82,7 +82,7 @@ export function LearningMap({
           }
         />
 
-        <StatusSummary counts={current.counts} />
+        <CoverageSummary counts={current.counts} />
       </Card>
 
       <div className="flex flex-col gap-3">
@@ -91,7 +91,7 @@ export function LearningMap({
             <div className="border-b border-line px-4 py-3">
               <p className="text-sm font-medium text-ink">{topic.topicName}</p>
               <p className="text-xs text-ink-2">
-                {topic.skills.filter((s) => s.status === 'MASTERED').length} of {topic.skills.length} mastered
+                {topic.skills.filter((s) => isCovered(s.status)).length} of {topic.skills.length} covered
               </p>
             </div>
 
@@ -137,38 +137,51 @@ export function LearningMap({
   );
 }
 
-/** Distribution across the four statuses, as a single bar plus a legend. */
-function StatusSummary({ counts }: { counts: Record<SkillStatus, number> }) {
-  const total = SKILL_STATUSES.reduce((sum, s) => sum + counts[s], 0);
+/**
+ * How much of the level this child has been taken through.
+ *
+ * Coverage is a two-state question, so this is one bar and two numbers rather
+ * than a distribution across shades of nearly-there.
+ */
+function CoverageSummary({ counts }: { counts: Record<SkillStatus, number> }) {
+  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
   if (total === 0) return null;
+
+  const covered = counts[COVERED_STATUS];
+  const remaining = total - covered;
 
   return (
     <div>
       <div className="mb-3 flex h-2 overflow-hidden rounded-full bg-lavender-2">
-        {SKILL_STATUSES.map((status) =>
-          counts[status] > 0 ? (
-            <span
-              key={status}
-              className={cn('h-full', TOKEN_STYLES[asToken(SKILL_STATUS_META[status].color)].bar)}
-              style={{ width: `${(counts[status] / total) * 100}%` }}
-            />
-          ) : null,
-        )}
+        {covered > 0 ? (
+          <span
+            className={cn('h-full', TOKEN_STYLES[asToken(SKILL_STATUS_META[COVERED_STATUS].color)].bar)}
+            style={{ width: `${(covered / total) * 100}%` }}
+          />
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-x-5 gap-y-2">
-        {SKILL_STATUSES.map((status) => (
-          <span key={status} className="flex items-center gap-1.5 text-xs text-ink-2">
-            <span
-              className={cn(
-                'h-2 w-2 rounded-full',
-                TOKEN_STYLES[asToken(SKILL_STATUS_META[status].color)].bar,
-              )}
-            />
-            <span className="font-semibold text-ink">{counts[status]}</span>
-            {SKILL_STATUS_META[status].label}
-          </span>
-        ))}
+        <span className="flex items-center gap-1.5 text-xs text-ink-2">
+          <span
+            className={cn(
+              'h-2 w-2 rounded-full',
+              TOKEN_STYLES[asToken(SKILL_STATUS_META[COVERED_STATUS].color)].bar,
+            )}
+          />
+          <span className="font-semibold text-ink">{covered}</span>
+          covered
+        </span>
+        <span className="flex items-center gap-1.5 text-xs text-ink-2">
+          <span
+            className={cn(
+              'h-2 w-2 rounded-full',
+              TOKEN_STYLES[asToken(SKILL_STATUS_META[NOT_COVERED_STATUS].color)].bar,
+            )}
+          />
+          <span className="font-semibold text-ink">{remaining}</span>
+          not yet
+        </span>
       </div>
     </div>
   );
@@ -201,7 +214,7 @@ function SkillEditor({
     <Modal
       open
       onClose={onClose}
-      title="Update skill"
+      title="Update coverage"
       description={skill.name}
       footer={
         <>
@@ -215,9 +228,9 @@ function SkillEditor({
       }
     >
       <div className="flex flex-col gap-4">
-        <Field label="Status" required error={error}>
+        <Field label="Has this been covered?" required error={error}>
           <div className="grid grid-cols-2 gap-2">
-            {SKILL_STATUSES.map((option) => (
+            {[COVERED_STATUS, NOT_COVERED_STATUS].map((option) => (
               <button
                 key={option}
                 type="button"
@@ -320,12 +333,12 @@ function LevelChangeModal({
             </p>
           </div>
 
-          <StatusSummary counts={data.counts} />
+          <CoverageSummary counts={data.counts} />
 
           {data.unfinishedSkills.length > 0 ? (
             <div>
               <p className="mb-2 text-xs font-medium text-ink-2">
-                Carry forward (optional) — {data.unfinishedSkills.length} skills not yet mastered
+                Carry forward (optional) — {data.unfinishedSkills.length} not yet covered
               </p>
               <ul className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
                 {data.unfinishedSkills.map((skill) => (

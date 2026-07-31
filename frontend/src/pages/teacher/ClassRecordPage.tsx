@@ -1,15 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Check, ChevronLeft, Plus, Trash2, X } from 'lucide-react';
+import { Check, ChevronLeft, Plus, X } from 'lucide-react';
 import type { AttendanceStatus, ClassContextDto, SkillStatus } from '@vig/shared';
 import {
   ATTENDANCE_META,
   ATTENDANCE_STATUSES,
+  COVERED_STATUS,
   formatInstantTime,
   formatShortDate,
-  SKILL_STATUS_META,
-  SKILL_STATUSES,
+  NOT_COVERED_STATUS,
 } from '@vig/shared';
 import { errorMessage, get, post, put } from '@/lib/api';
 import { Avatar } from '@/components/ui/Layout';
@@ -18,9 +18,10 @@ import { Card, CardHeader } from '@/components/ui/Card';
 import { ErrorState, LoadingState } from '@/components/ui/States';
 import { Field, Select, Textarea } from '@/components/ui/Field';
 import { AttendanceChip } from '@/components/ui/Chip';
+import { CoverageGrid, coverageKey, toTickedSet } from '@/components/CoverageGrid';
 import { cn } from '@/lib/ui';
 
-const STEPS = ['Attendance', 'Class Note', 'Updates', 'Review'] as const;
+const STEPS = ['Attendance', 'Class Note', 'Coverage', 'Review'] as const;
 type Step = (typeof STEPS)[number];
 
 interface LearningDraft {
@@ -33,6 +34,38 @@ interface DevelopmentDraft {
   studentId: string;
   areaId: string;
   observation: string;
+}
+
+/**
+ * Only the boxes whose value actually changed become history.
+ *
+ * The grid opens showing what a child has already been taken through, so most of
+ * it is untouched on any given day; writing all of it back would bury the real
+ * change under a page of noise.
+ */
+function coverageDiff(
+  before: Set<string>,
+  after: Set<string>,
+  students: Array<{ id: string }>,
+  headings: ClassContextDto['headings'],
+): LearningDraft[] {
+  const updates: LearningDraft[] = [];
+
+  for (const student of students) {
+    for (const heading of headings) {
+      for (const sub of heading.subHeadings) {
+        const key = coverageKey(student.id, sub.id);
+        if (before.has(key) === after.has(key)) continue;
+        updates.push({
+          studentId: student.id,
+          skillId: sub.id,
+          newStatus: after.has(key) ? COVERED_STATUS : NOT_COVERED_STATUS,
+        });
+      }
+    }
+  }
+
+  return updates;
 }
 
 /**
@@ -62,7 +95,7 @@ export function ClassRecordPage() {
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
   const [overallClassNote, setOverallClassNote] = useState('');
   const [observations, setObservations] = useState<Record<string, string>>({});
-  const [learningUpdates, setLearningUpdates] = useState<LearningDraft[]>([]);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [developmentUpdates, setDevelopmentUpdates] = useState<DevelopmentDraft[]>([]);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -70,9 +103,19 @@ export function ClassRecordPage() {
     queryFn: () => get<ClassContextDto>(`/occurrences/${occurrenceId}/context`),
   });
 
+  // What was already covered before today — both the grid's starting state and
+  // the baseline the save diffs against.
+  const alreadyCovered = useMemo(() => toTickedSet(data?.covered ?? {}), [data]);
+  useEffect(() => setTicked(new Set(alreadyCovered)), [alreadyCovered]);
+
   const present = useMemo(
     () => (data?.students ?? []).filter((s) => attendance[s.id] !== 'ABSENT'),
     [data, attendance],
+  );
+
+  const learningUpdates = useMemo(
+    () => coverageDiff(alreadyCovered, ticked, present, data?.headings ?? []),
+    [alreadyCovered, ticked, present, data],
   );
 
   const save = useMutation({
@@ -347,12 +390,18 @@ export function ClassRecordPage() {
         </>
       ) : null}
 
-      {step === 'Updates' ? (
+      {step === 'Coverage' ? (
         <OptionalUpdates
           context={data}
           present={present}
-          learningUpdates={learningUpdates}
-          setLearningUpdates={setLearningUpdates}
+          ticked={ticked}
+          onToggle={(studentId, skillId) => {
+            const key = coverageKey(studentId, skillId);
+            const next = new Set(ticked);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            setTicked(next);
+          }}
           developmentUpdates={developmentUpdates}
           setDevelopmentUpdates={setDevelopmentUpdates}
         />
@@ -391,16 +440,19 @@ export function ClassRecordPage() {
               ) : null}
             </ReviewBlock>
 
-            <ReviewBlock title={`Learning updates (${learningUpdates.length})`}>
+            <ReviewBlock title={`Coverage changes (${learningUpdates.length})`}>
               {learningUpdates.length === 0 ? (
-                <p className="text-sm text-ink-3">None added.</p>
+                <p className="text-sm text-ink-3">Nothing newly ticked.</p>
               ) : (
                 learningUpdates.map((u, i) => {
                   const student = data.students.find((s) => s.id === u.studentId);
-                  const skill = data.skills.find((s) => s.id === u.skillId);
+                  const sub = data.headings
+                    .flatMap((h) => h.subHeadings)
+                    .find((s) => s.id === u.skillId);
                   return (
                     <p key={i} className="text-sm text-ink">
-                      {student?.fullName} · {skill?.name} → {SKILL_STATUS_META[u.newStatus].label}
+                      {student?.fullName} · {sub?.name}{' '}
+                      {u.newStatus === COVERED_STATUS ? '→ covered' : '→ removed'}
                     </p>
                   );
                 })
@@ -458,15 +510,15 @@ function RecordSourceStep() {
 function OptionalUpdates({
   context,
   present,
-  learningUpdates,
-  setLearningUpdates,
+  ticked,
+  onToggle,
   developmentUpdates,
   setDevelopmentUpdates,
 }: {
   context: ClassContextDto;
   present: ClassContextDto['students'];
-  learningUpdates: LearningDraft[];
-  setLearningUpdates: (next: LearningDraft[]) => void;
+  ticked: Set<string>;
+  onToggle: (studentId: string, skillId: string) => void;
   developmentUpdates: DevelopmentDraft[];
   setDevelopmentUpdates: (next: DevelopmentDraft[]) => void;
 }) {
@@ -474,105 +526,17 @@ function OptionalUpdates({
     <>
       <Card className="mb-4">
         <CardHeader
-          title="Learning updates"
-          description="Optional. Only add a change you actually observed — never manufacture one."
+          title="What was covered"
+          description="Tick each student against what you took them through today. Boxes already ticked were covered in an earlier class."
         />
 
-        <div className="flex flex-col gap-3">
-          {learningUpdates.map((update, index) => (
-            <div key={index} className="flex flex-wrap items-end gap-2 rounded-[12px] border border-line p-3">
-              <div className="min-w-[130px] flex-1">
-                <Field label="Student">
-                  <Select
-                    value={update.studentId}
-                    onChange={(e) =>
-                      setLearningUpdates(
-                        learningUpdates.map((u, i) =>
-                          i === index ? { ...u, studentId: e.target.value } : u,
-                        ),
-                      )
-                    }
-                  >
-                    {present.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.fullName}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-
-              <div className="min-w-[150px] flex-1">
-                <Field label="Skill">
-                  <Select
-                    value={update.skillId}
-                    onChange={(e) =>
-                      setLearningUpdates(
-                        learningUpdates.map((u, i) => (i === index ? { ...u, skillId: e.target.value } : u)),
-                      )
-                    }
-                  >
-                    {context.skills.map((skill) => (
-                      <option key={skill.id} value={skill.id}>
-                        {skill.topicName} · {skill.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-
-              <div className="min-w-[130px]">
-                <Field label="New status">
-                  <Select
-                    value={update.newStatus}
-                    onChange={(e) =>
-                      setLearningUpdates(
-                        learningUpdates.map((u, i) =>
-                          i === index ? { ...u, newStatus: e.target.value as SkillStatus } : u,
-                        ),
-                      )
-                    }
-                  >
-                    {SKILL_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {SKILL_STATUS_META[s].label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setLearningUpdates(learningUpdates.filter((_, i) => i !== index))}
-                aria-label="Remove learning update"
-                className="touch-target mb-1 flex items-center justify-center rounded-full text-ink-3 hover:bg-danger-bg hover:text-danger"
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Plus size={14} />}
-          className="mt-3"
-          disabled={present.length === 0 || context.skills.length === 0}
-          onClick={() =>
-            setLearningUpdates([
-              ...learningUpdates,
-              {
-                studentId: present[0]!.id,
-                skillId: context.skills[0]!.id,
-                newStatus: 'LEARNING',
-              },
-            ])
-          }
-        >
-          Add Learning Update
-        </Button>
+        <CoverageGrid
+          students={present}
+          headings={context.headings}
+          ticked={ticked}
+          onToggle={onToggle}
+          emptyHint="This level has no sub-headings yet. Add them under Curriculum and they will appear here."
+        />
       </Card>
 
       <Card>

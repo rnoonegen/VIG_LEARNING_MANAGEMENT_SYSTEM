@@ -86,15 +86,34 @@ export const createLevelSchema = z.object({
   name: z.string().min(1, 'Level name is required'),
 });
 
+/** A heading inside a level. */
 export const createTopicSchema = z.object({
-  name: z.string().min(1, 'Topic name is required'),
+  name: z.string().min(1, 'Heading is required'),
 });
 
+/** A sub-heading inside a heading — what a student is ticked off against. */
 export const createSkillSchema = z.object({
-  name: z.string().min(1, 'Skill name is required'),
+  name: z.string().min(1, 'Sub-heading is required'),
   description: z.string().optional(),
   learningGoal: z.string().optional(),
 });
+
+/**
+ * Coverage: one tick per student per sub-heading. The whole grid is sent, and
+ * only the entries that actually changed become history rows.
+ */
+export const putCoverageSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        studentId: uuid,
+        skillId: uuid,
+        covered: z.boolean(),
+      }),
+    )
+    .max(2000),
+});
+export type PutCoverageInput = z.infer<typeof putCoverageSchema>;
 
 export const updateCurriculumNodeSchema = z.object({
   name: z.string().min(1).optional(),

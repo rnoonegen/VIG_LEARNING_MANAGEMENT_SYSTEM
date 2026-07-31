@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { classRecordDraftSchema, dateKey, putAttendanceSchema } from '@vig/shared';
+import { classRecordDraftSchema, dateKey, putAttendanceSchema, putCoverageSchema } from '@vig/shared';
 import { handler, ok, validateBody } from '../../lib/http.js';
 import { auth, requireRole } from '../../auth/middleware.js';
 import { assertTeacherOwnsOccurrence } from '../../auth/guards.js';
 import { prisma } from '../../prisma.js';
 import { forbidden, notFound } from '../../lib/errors.js';
+import * as coverage from '../learning/coverage.js';
 import * as service from './service.js';
 
 export const occurrenceRecordRouter = Router();
@@ -47,6 +48,30 @@ occurrenceRecordRouter.put(
   handler(async (req, res) => {
     await assertTeacherOwnsOccurrence(auth(req), req.params.id);
     return ok(res, await service.putAttendance(req.params.id, req.body.entries));
+  }),
+);
+
+/**
+ * Coverage ticks, outside the class-record wizard. Same data, reachable on its
+ * own so a teacher can complete a class they recorded earlier in the day.
+ */
+occurrenceRecordRouter.get(
+  '/:id/coverage',
+  handler(async (req, res) => {
+    await assertTeacherOwnsOccurrence(auth(req), req.params.id);
+    return ok(res, await coverage.getCoverage(req.params.id));
+  }),
+);
+
+occurrenceRecordRouter.put(
+  '/:id/coverage',
+  requireRole('TEACHER', 'ADMIN'),
+  validateBody(putCoverageSchema),
+  handler(async (req, res) => {
+    const ctx = auth(req);
+    await assertTeacherOwnsOccurrence(ctx, req.params.id);
+    const source = ctx.role === 'ADMIN' ? 'ADMIN_MANUAL' : 'TEACHER_MANUAL';
+    return ok(res, await coverage.putCoverage(req.params.id, req.body.entries, ctx.userId, source));
   }),
 );
 

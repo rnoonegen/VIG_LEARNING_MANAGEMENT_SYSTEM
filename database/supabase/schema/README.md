@@ -54,6 +54,7 @@ only to generate the Prisma Client the backend queries through, and it is
 | `012_rls_deny_all.sql` | RLS enabled deny-all on every table (AD-01) |
 | `013_storage_buckets.sql` | private `moments` and `avatars` buckets (AD-04) |
 | `014_reference_data.sql` | school settings + development-area catalogue |
+| `015_curriculum_authorship.sql` | author + timestamps on headings and sub-headings |
 
 Foreign keys live in one file applied last, so the 39 `CREATE TABLE` statements
 have no ordering dependency between files. Keep that convention: put new tables

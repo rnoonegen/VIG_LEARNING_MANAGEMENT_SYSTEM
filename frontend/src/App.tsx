@@ -11,10 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 
 import { AdminHomePage } from './pages/admin/AdminHomePage';
-import { CurriculumPage } from './pages/admin/curriculum/CurriculumPage';
-import { SubjectPage } from './pages/admin/curriculum/SubjectPage';
-import { LevelPage } from './pages/admin/curriculum/LevelPage';
-import { TopicPage } from './pages/admin/curriculum/TopicPage';
+import { AdminCurriculumPage, TeacherCurriculumPage } from './pages/curriculum/CurriculumTree';
 import { TeachersPage } from './pages/admin/teachers/TeachersPage';
 import { TeacherProfilePage } from './pages/admin/teachers/TeacherProfilePage';
 import { StudentsPage } from './pages/students/StudentsPage';
@@ -29,6 +26,7 @@ import { UsersPage } from './pages/admin/UsersPage';
 import { TeacherHomePage } from './pages/teacher/TeacherHomePage';
 import { TeacherSchedulePage } from './pages/teacher/TeacherSchedulePage';
 import { ClassRecordPage } from './pages/teacher/ClassRecordPage';
+import { ClassProgressPage } from './pages/teacher/ClassProgressPage';
 
 import { MomentsPage } from './pages/moments/MomentsPage';
 
@@ -90,10 +88,7 @@ export function App() {
         }
       >
         <Route path="/admin" element={<AdminHomePage />} />
-        <Route path="/admin/curriculum" element={<CurriculumPage />} />
-        <Route path="/admin/curriculum/subjects/:subjectId" element={<SubjectPage />} />
-        <Route path="/admin/curriculum/levels/:levelId" element={<LevelPage />} />
-        <Route path="/admin/curriculum/topics/:topicId" element={<TopicPage />} />
+        <Route path="/admin/curriculum" element={<AdminCurriculumPage />} />
         <Route path="/admin/teachers" element={<TeachersPage />} />
         <Route path="/admin/teachers/:teacherId" element={<TeacherProfilePage />} />
         <Route path="/admin/students" element={<StudentsPage basePath="/admin/students" canManage />} />
@@ -119,6 +114,8 @@ export function App() {
         <Route path="/teacher/schedule" element={<TeacherSchedulePage />} />
         <Route path="/teacher/students" element={<StudentsPage basePath="/teacher/students" />} />
         <Route path="/teacher/students/:studentId" element={<StudentProfilePage basePath="/teacher/students" />} />
+        <Route path="/teacher/curriculum" element={<TeacherCurriculumPage />} />
+        <Route path="/teacher/class/:occurrenceId/progress" element={<ClassProgressPage />} />
         <Route path="/teacher/moments" element={<MomentsPage />} />
       </Route>
 

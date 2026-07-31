@@ -79,7 +79,7 @@ export async function generate(studentId: string, weekStartKey: string) {
 
   // --- Week at a glance, assembled from what was actually approved ----------
   const subjectsWorkedOn = [...new Set(records.map((r) => r.occurrence.class.subject.name))];
-  const mastered = learning.filter((l) => l.newStatus === 'MASTERED').map((l) => l.skill.name);
+  const covered = learning.filter((l) => l.newStatus === 'MASTERED').map((l) => l.skill.name);
   const growthAreas = [...new Set(development.map((d) => d.area.name))];
 
   const sentences: string[] = [];
@@ -88,8 +88,8 @@ export async function generate(studentId: string, weekStartKey: string) {
       `This week ${student.fullName.split(' ')[0]} worked on ${joinNaturally(subjectsWorkedOn)}.`,
     );
   }
-  if (mastered.length) {
-    sentences.push(`They showed secure understanding in ${joinNaturally(mastered)}.`);
+  if (covered.length) {
+    sentences.push(`They were taken through ${joinNaturally(covered)}.`);
   }
   if (growthAreas.length) {
     sentences.push(`Teachers also noted growth in ${joinNaturally(growthAreas.map((g) => g.toLowerCase()))}.`);

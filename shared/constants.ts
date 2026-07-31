@@ -35,15 +35,31 @@ export function subjectColor(subjectName: string): SemanticToken {
   return SUBJECT_COLORS[subjectName] ?? DEFAULT_SUBJECT_COLOR;
 }
 
+/**
+ * Coverage is a two-state question: has this child been taken through this
+ * sub-heading, or not. The teacher ticks a box; there is no scale to interpret.
+ *
+ * The stored enum keeps four values because `learning_updates` is append-only
+ * history and older rows may hold any of them — but only these two are ever
+ * written now, and only these two are ever shown.
+ */
+export const COVERED_STATUS = 'MASTERED' as const satisfies SkillStatus;
+export const NOT_COVERED_STATUS = 'TO_LEARN' as const satisfies SkillStatus;
+
+export function isCovered(status: SkillStatus | null | undefined): boolean {
+  return status === COVERED_STATUS;
+}
+
 /** Learning-state → colour + label. Stable across Admin, Teacher and Parent. */
 export const SKILL_STATUS_META: Record<
   SkillStatus,
   { label: string; color: SemanticToken; icon: string }
 > = {
-  TO_LEARN: { label: 'To Learn', color: 'muted', icon: 'circle' },
-  LEARNING: { label: 'Learning', color: 'blue', icon: 'play' },
-  NEEDS_SUPPORT: { label: 'Needs Support', color: 'orange', icon: 'alert' },
-  MASTERED: { label: 'Mastered', color: 'green', icon: 'check' },
+  TO_LEARN: { label: 'Not yet covered', color: 'muted', icon: 'circle' },
+  // Retained for history written before coverage became two-state.
+  LEARNING: { label: 'In progress', color: 'blue', icon: 'play' },
+  NEEDS_SUPPORT: { label: 'Needs support', color: 'orange', icon: 'alert' },
+  MASTERED: { label: 'Covered', color: 'green', icon: 'check' },
 };
 
 export const DEV_STAGE_META: Record<DevStage, { label: string; color: SemanticToken; icon: string }> = {

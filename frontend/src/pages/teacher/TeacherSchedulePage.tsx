@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { OccurrenceDto } from '@vig/shared';
@@ -88,11 +88,16 @@ export function TeacherSchedulePage() {
                 </h2>
                 <div className="flex flex-col gap-2">
                   {occurrences.map((occurrence) => (
-                    <OccurrenceRow
-                      key={occurrence.id}
-                      occurrence={occurrence}
-                      to={`/teacher/class/${occurrence.id}`}
-                    />
+                    <div key={occurrence.id} className="flex flex-col gap-1">
+                      <OccurrenceRow occurrence={occurrence} to={`/teacher/class/${occurrence.id}`} />
+                      {/* Ticking off coverage without reopening the whole record. */}
+                      <Link
+                        to={`/teacher/class/${occurrence.id}/progress`}
+                        className="self-end text-xs font-medium text-violet hover:underline"
+                      >
+                        Mark what was covered
+                      </Link>
+                    </div>
                   ))}
                 </div>
               </section>

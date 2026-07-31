@@ -96,6 +96,73 @@ export interface SubjectDto {
   levels?: LevelDto[];
 }
 
+// --- Curriculum authoring (Subject → Level → Heading → Sub-heading) ---------
+
+/**
+ * A heading or sub-heading, with the trace of who wrote it. Admin and the
+ * assigned teacher both write to the same list, so authorship is part of the
+ * record rather than an afterthought.
+ */
+export interface CurriculumEntryDto {
+  id: string;
+  name: string;
+  displayOrder: number;
+  addedByName: string | null;
+  addedAt: string;
+}
+
+export interface SubHeadingDto extends CurriculumEntryDto {
+  description: string | null;
+}
+
+export interface HeadingDto extends CurriculumEntryDto {
+  subHeadings: SubHeadingDto[];
+}
+
+export interface CurriculumLevelDto {
+  id: string;
+  name: string;
+  displayOrder: number;
+  /** True when the caller may add headings under this level. */
+  canAuthor: boolean;
+  headings: HeadingDto[];
+}
+
+export interface CurriculumSubjectDto {
+  id: string;
+  name: string;
+  colorToken: string;
+  displayOrder: number;
+  /** Renaming the subject and its levels is structural — admin only. */
+  canRename: boolean;
+  teacherNames: string[];
+  levels: CurriculumLevelDto[];
+}
+
+// --- Coverage — what a student has been taken through ------------------------
+
+export interface CoverageStudentDto {
+  id: string;
+  fullName: string;
+  avatarUrl: string | null;
+}
+
+export interface CoverageDto {
+  occurrenceId: string;
+  subjectName: string;
+  colorToken: string;
+  levelName: string;
+  scheduledStart: string;
+  students: CoverageStudentDto[];
+  headings: Array<{
+    id: string;
+    name: string;
+    subHeadings: Array<{ id: string; name: string }>;
+  }>;
+  /** studentId → sub-heading ids already covered, across all classes. */
+  covered: Record<string, string[]>;
+}
+
 // --- Teachers ---------------------------------------------------------------
 
 export interface CapabilityDto {
@@ -227,8 +294,14 @@ export interface ClassContextDto {
     occurrenceDate: string;
     overallClassNote: string;
   } | null;
-  /** Skills available for a learning update, scoped to this class's level. */
-  skills: Array<{ id: string; name: string; topicName: string }>;
+  /** Sub-headings for this class's level, grouped under their heading. */
+  headings: Array<{
+    id: string;
+    name: string;
+    subHeadings: Array<{ id: string; name: string }>;
+  }>;
+  /** studentId → sub-heading ids already covered, so the grid opens pre-ticked. */
+  covered: Record<string, string[]>;
   developmentAreas: Array<{ id: string; name: string; category: DevCategory }>;
 }
 

@@ -26,6 +26,53 @@ export async function assertTeacherOwnsOccurrence(
   if (!occurrence) throw forbidden('This class is not assigned to you.');
 }
 
+/**
+ * Who may write the curriculum under a level.
+ *
+ * The admin builds the structure — subjects and their levels — and a teacher
+ * fills in the headings and sub-headings for what they actually teach. So the
+ * test is their capability: the right subject, and a level inside the range they
+ * were assigned. A teacher who has not been given the subject cannot author it.
+ */
+export async function assertCanAuthorLevel(ctx: AuthContext, levelId: string): Promise<void> {
+  if (ctx.role === 'ADMIN') return;
+  if (ctx.role !== 'TEACHER' || !ctx.teacherId) throw forbidden();
+
+  const level = await prisma.level.findUnique({
+    where: { id: levelId },
+    select: { subjectId: true, displayOrder: true, name: true },
+  });
+  if (!level) throw notFound('Level');
+
+  const capability = await prisma.teacherCapability.findUnique({
+    where: { teacherId_subjectId: { teacherId: ctx.teacherId, subjectId: level.subjectId } },
+    select: { minLevelOrder: true, maxLevelOrder: true },
+  });
+  if (!capability) throw forbidden('You can only edit the curriculum for a subject you teach.');
+
+  if (level.displayOrder < capability.minLevelOrder || level.displayOrder > capability.maxLevelOrder) {
+    throw forbidden(`${level.name} is outside the levels you are assigned to teach.`);
+  }
+}
+
+/** The same check, reached from a heading or a sub-heading rather than a level. */
+export async function assertCanAuthorTopic(ctx: AuthContext, topicId: string): Promise<void> {
+  if (ctx.role === 'ADMIN') return;
+  const topic = await prisma.topic.findUnique({ where: { id: topicId }, select: { levelId: true } });
+  if (!topic) throw notFound('Heading');
+  await assertCanAuthorLevel(ctx, topic.levelId);
+}
+
+export async function assertCanAuthorSkill(ctx: AuthContext, skillId: string): Promise<void> {
+  if (ctx.role === 'ADMIN') return;
+  const skill = await prisma.skill.findUnique({
+    where: { id: skillId },
+    select: { topic: { select: { levelId: true } } },
+  });
+  if (!skill) throw notFound('Sub-heading');
+  await assertCanAuthorLevel(ctx, skill.topic.levelId);
+}
+
 /** Parents may only read children linked to their parent record (BR-13). */
 export async function assertParentLinkedToStudent(
   ctx: AuthContext,

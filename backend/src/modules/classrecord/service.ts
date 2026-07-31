@@ -5,7 +5,8 @@ import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { container } from '../../ai/container.js';
 import { toOccurrenceDto } from '../scheduling/service.js';
-import { skillsForLevel } from '../curriculum/service.js';
+import { headingsForLevel } from '../curriculum/service.js';
+import { coveredByStudent } from '../learning/coverage.js';
 import { avatarStorage, signMany } from '../../lib/storage.js';
 
 /**
@@ -34,7 +35,7 @@ export async function getContext(occurrenceId: string): Promise<ClassContextDto>
   });
   if (!occurrence) throw notFound('Class');
 
-  const [previous, skills, areas, avatars] = await Promise.all([
+  const [previous, headings, areas, avatars] = await Promise.all([
     prisma.classRecord.findFirst({
       where: {
         status: 'SAVED',
@@ -43,7 +44,7 @@ export async function getContext(occurrenceId: string): Promise<ClassContextDto>
       orderBy: { occurrence: { scheduledStart: 'desc' } },
       include: { occurrence: { select: { scheduledStart: true } } },
     }),
-    skillsForLevel(occurrence.class.levelId),
+    headingsForLevel(occurrence.class.levelId),
     prisma.developmentArea.findMany({
       where: { status: 'ACTIVE' },
       orderBy: [{ category: 'asc' }, { displayOrder: 'asc' }],
@@ -53,6 +54,13 @@ export async function getContext(occurrenceId: string): Promise<ClassContextDto>
       avatarStorage,
     ),
   ]);
+
+  // The coverage grid opens showing what each child has already been taken
+  // through, so a teacher ticks what is new rather than restating the term.
+  const covered = await coveredByStudent(
+    occurrence.class.students.map((cs) => cs.studentId),
+    headings.flatMap((h) => h.subHeadings.map((s) => s.id)),
+  );
 
   return {
     occurrence: toOccurrenceDto(occurrence),
@@ -68,7 +76,8 @@ export async function getContext(occurrenceId: string): Promise<ClassContextDto>
           overallClassNote: previous.overallClassNote,
         }
       : null,
-    skills,
+    headings,
+    covered,
     developmentAreas: areas.map((a) => ({ id: a.id, name: a.name, category: a.category })),
   };
 }
@@ -381,7 +390,10 @@ export async function buildDraft(occurrenceId: string, manualDraft: ClassRecordD
     roster: present.map((p) => ({ studentId: p.studentId, fullName: p.fullName })),
     subjectName: context.occurrence.subjectName,
     levelName: context.occurrence.levelName,
-    skills: context.skills,
+    // The extractor contract takes one flat list; the grid groups it (§2.2).
+    skills: context.headings.flatMap((h) =>
+      h.subHeadings.map((s) => ({ id: s.id, name: s.name, topicName: h.name })),
+    ),
     developmentAreas: context.developmentAreas,
     manualDraft,
   });

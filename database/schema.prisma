@@ -176,6 +176,8 @@ model User {
   parent              Parent?
   notifications       Notification[]
   authoredRecords     ClassRecord[]            @relation("ClassRecordAuthor")
+  authoredTopics      Topic[]                  @relation("TopicAuthor")
+  authoredSkills      Skill[]                  @relation("SkillAuthor")
   authoredLearning    LearningUpdate[]         @relation("LearningUpdateAuthor")
   observedDevelopment DevelopmentObservation[] @relation("DevelopmentObserver")
   createdMoments      Moment[]                 @relation("MomentCreator")
@@ -315,20 +317,29 @@ model Level {
   @@map("levels")
 }
 
+/// A heading within a level. Written by an admin or by the teacher assigned to
+/// the subject, so authorship and timestamps are recorded (015).
 model Topic {
   id           String           @id @default(uuid()) @db.Uuid
   levelId      String           @map("level_id") @db.Uuid
   name         String
   displayOrder Int              @default(0) @map("display_order")
   status       CurriculumStatus @default(ACTIVE)
+  createdById  String?          @map("created_by") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  level  Level   @relation(fields: [levelId], references: [id], onDelete: Cascade)
-  skills Skill[]
+  level     Level   @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation("TopicAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  skills    Skill[]
 
   @@index([levelId, displayOrder])
+  @@index([createdById])
   @@map("topics")
 }
 
+/// A sub-heading within a heading — the smallest unit a student is ticked off
+/// against. Authored like its parent topic (015).
 model Skill {
   id           String           @id @default(uuid()) @db.Uuid
   topicId      String           @map("topic_id") @db.Uuid
@@ -337,12 +348,17 @@ model Skill {
   learningGoal String?          @map("learning_goal")
   displayOrder Int              @default(0) @map("display_order")
   status       CurriculumStatus @default(ACTIVE)
+  createdById  String?          @map("created_by") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   topic           Topic                  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  createdBy       User?                  @relation("SkillAuthor", fields: [createdById], references: [id], onDelete: SetNull)
   studentProgress StudentSkillProgress[]
   learningUpdates LearningUpdate[]
 
   @@index([topicId, displayOrder])
+  @@index([createdById])
   @@map("skills")
 }
 
