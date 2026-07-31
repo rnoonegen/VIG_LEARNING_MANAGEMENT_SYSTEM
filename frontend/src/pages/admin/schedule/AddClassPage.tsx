@@ -211,7 +211,8 @@ export function AddClassPage() {
             <Field label="Teacher" hint="Leave blank to let VIG suggest any capable teacher.">
               <Select value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>
                 <option value="">Any capable teacher</option>
-                {teachers?.map((t) => (
+                {/* Deactivated teachers cannot take a class, so they are not offered one. */}
+                {teachers?.filter((t) => t.status === 'ACTIVE').map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.fullName}
                   </option>

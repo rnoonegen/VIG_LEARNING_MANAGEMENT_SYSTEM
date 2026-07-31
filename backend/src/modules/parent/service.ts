@@ -1,7 +1,7 @@
 import type { ParentChildDto, ParentHomeDto, SkillStatus } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { forbidden, notFound } from '../../lib/errors.js';
-import { storage } from '../../lib/storage.js';
+import { signAvatar } from '../../lib/storage.js';
 import { listMoments } from '../moments/service.js';
 import { getStudentDevelopment } from '../development/service.js';
 
@@ -24,9 +24,7 @@ export async function listChildren(parentId: string): Promise<ParentChildDto[]> 
       fullName: l.student.fullName,
       gradeLabel: l.student.gradeLabel,
       relationship: l.relationship,
-      avatarUrl: l.student.avatarPath
-        ? await storage.createSignedReadUrl(l.student.avatarPath).catch(() => null)
-        : null,
+      avatarUrl: await signAvatar(l.student.avatarPath),
     })),
   );
 }

@@ -10,7 +10,11 @@ import { AppError } from './errors.js';
  * the caller's access to that student has been verified.
  */
 export interface IStorageProvider {
-  createUploadUrl(fileName: string, mimeType: string): Promise<{ path: string; uploadUrl: string; token: string }>;
+  createUploadUrl(
+    fileName: string,
+    mimeType: string,
+    prefix?: string,
+  ): Promise<{ path: string; uploadUrl: string; token: string }>;
   createSignedReadUrl(path: string, expiresInSeconds?: number): Promise<string>;
   remove(path: string): Promise<void>;
 }
@@ -18,11 +22,16 @@ export interface IStorageProvider {
 const SIGNED_READ_TTL_SECONDS = 60 * 60; // one hour
 
 class SupabaseStorageProvider implements IStorageProvider {
-  private readonly bucket = env.SUPABASE_STORAGE_BUCKET;
+  constructor(private readonly bucket: string) {}
 
-  async createUploadUrl(fileName: string): Promise<{ path: string; uploadUrl: string; token: string }> {
+  async createUploadUrl(
+    fileName: string,
+    _mimeType?: string,
+    prefix?: string,
+  ): Promise<{ path: string; uploadUrl: string; token: string }> {
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const path = `${new Date().getUTCFullYear()}/${randomUUID()}-${safeName}`;
+    const folder = prefix ? `${prefix}/` : '';
+    const path = `${folder}${new Date().getUTCFullYear()}/${randomUUID()}-${safeName}`;
 
     const { data, error } = await supabaseAdmin().storage.from(this.bucket).createSignedUploadUrl(path);
 
@@ -48,22 +57,39 @@ class SupabaseStorageProvider implements IStorageProvider {
   }
 }
 
-export const storage: IStorageProvider = new SupabaseStorageProvider();
+/** Class media: photos and video from Moments and class records. */
+export const storage: IStorageProvider = new SupabaseStorageProvider(env.SUPABASE_STORAGE_BUCKET);
+
+/** Profile photographs for users and students. Private, like everything else. */
+export const avatarStorage: IStorageProvider = new SupabaseStorageProvider(env.SUPABASE_AVATAR_BUCKET);
 
 /**
  * Batch helper for gallery responses — signs many paths concurrently and drops
  * any that fail rather than failing the whole page.
  */
-export async function signMany(paths: string[]): Promise<Map<string, string>> {
+export async function signMany(
+  paths: string[],
+  provider: IStorageProvider = storage,
+): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   await Promise.all(
     paths.map(async (p) => {
       try {
-        out.set(p, await storage.createSignedReadUrl(p));
+        out.set(p, await provider.createSignedReadUrl(p));
       } catch {
         // A single unreadable object should not blank the gallery.
       }
     }),
   );
   return out;
+}
+
+/** One avatar path → a signed URL, or null. Never fails a page over a photo. */
+export async function signAvatar(path: string | null): Promise<string | null> {
+  if (!path) return null;
+  try {
+    return await avatarStorage.createSignedReadUrl(path);
+  } catch {
+    return null;
+  }
 }

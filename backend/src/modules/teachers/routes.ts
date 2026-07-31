@@ -1,10 +1,13 @@
 import { Router } from 'express';
-import { z } from 'zod';
 import {
+  avatarUploadUrlSchema,
   createExceptionSchema,
   createTeacherSchema,
   putAvailabilitySchema,
   putCapabilitiesSchema,
+  setAvatarSchema,
+  setTeacherStatusSchema,
+  updateTeacherSchema,
 } from '@vig/shared';
 import { handler, ok, validateBody } from '../../lib/http.js';
 import { auth, requireRole } from '../../auth/middleware.js';
@@ -47,8 +50,46 @@ teachersRouter.get(
 teachersRouter.patch(
   '/:id',
   requireRole('ADMIN'),
-  validateBody(z.object({ fullName: z.string().min(1).optional(), notes: z.string().optional() })),
-  handler(async (req, res) => ok(res, await service.updateTeacher(req.params.id, req.body))),
+  validateBody(updateTeacherSchema),
+  handler(async (req, res) => ok(res, await service.updateTeacher(req.params.id, req.body, auth(req).userId))),
+);
+
+/**
+ * Profile photo. The browser uploads to the signed URL directly and posts back
+ * only the path; the bucket stays private and every read is a signed URL.
+ */
+teachersRouter.post(
+  '/:id/avatar-upload-url',
+  requireRole('ADMIN'),
+  validateBody(avatarUploadUrlSchema),
+  handler(async (req, res) =>
+    ok(res, await service.createAvatarUploadUrl(req.params.id, req.body.fileName, req.body.mimeType)),
+  ),
+);
+
+teachersRouter.put(
+  '/:id/avatar',
+  requireRole('ADMIN'),
+  validateBody(setAvatarSchema),
+  handler(async (req, res) =>
+    ok(res, await service.setAvatar(req.params.id, req.body.storagePath, auth(req).userId)),
+  ),
+);
+
+teachersRouter.delete(
+  '/:id/avatar',
+  requireRole('ADMIN'),
+  handler(async (req, res) => ok(res, await service.removeAvatar(req.params.id, auth(req).userId))),
+);
+
+/** Deactivate or reactivate. There is no delete — see service.setTeacherStatus. */
+teachersRouter.patch(
+  '/:id/status',
+  requireRole('ADMIN'),
+  validateBody(setTeacherStatusSchema),
+  handler(async (req, res) =>
+    ok(res, await service.setTeacherStatus(req.params.id, req.body.status, auth(req).userId)),
+  ),
 );
 
 teachersRouter.put(

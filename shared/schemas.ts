@@ -117,6 +117,41 @@ export const createTeacherSchema = z.object({
   notes: z.string().optional(),
 });
 
+/**
+ * Editing a teacher. The username is their sign-in name, so changing it changes
+ * how they log in — the form says so, and the API keeps the auth account in step.
+ */
+export const updateTeacherSchema = z.object({
+  fullName: z.string().min(1, 'Full name is required').optional(),
+  username: createUserSchema.shape.username.optional(),
+  notes: z.string().optional(),
+});
+
+/**
+ * A teacher is never deleted. Their records — class notes, learning updates,
+ * observations — are the school's history of a child, so deactivation removes
+ * access and leaves everything they wrote in place. ARCHIVED is deliberately not
+ * offered here.
+ */
+export const setTeacherStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'INACTIVE']),
+});
+
+/** The avatars bucket accepts still images only, up to 5 MB (013_storage_buckets.sql). */
+export const AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+
+export const avatarUploadUrlSchema = z.object({
+  fileName: z.string().min(1),
+  mimeType: z.enum(AVATAR_MIME_TYPES, {
+    errorMap: () => ({ message: 'Use a JPEG, PNG or WebP image.' }),
+  }),
+});
+
+export const setAvatarSchema = z.object({
+  storagePath: z.string().min(1),
+});
+
 export const capabilitySchema = z.object({
   subjectId: uuid,
   minLevelOrder: z.number().int().min(0),

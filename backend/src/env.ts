@@ -20,6 +20,9 @@ const schema = z.object({
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('moments'),
+  // Profile photographs live apart from class media: a different bucket, a
+  // smaller size limit, images only (013_storage_buckets.sql).
+  SUPABASE_AVATAR_BUCKET: z.string().default('avatars'),
   AUTH_EMAIL_DOMAIN: z.string().default('users.valmiki.internal'),
 
   SCHOOL_TIMEZONE: z.string().default('Asia/Kolkata'),

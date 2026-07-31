@@ -4,7 +4,7 @@ import { prisma } from '../prisma.js';
 import { supabaseAdmin, supabaseAnon, usernameToEmail } from '../lib/supabase.js';
 import { AppError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.js';
 import { audit } from '../lib/audit.js';
-import { storage } from '../lib/storage.js';
+import { signAvatar } from '../lib/storage.js';
 
 /**
  * Temporary passwords are shown to the admin exactly once, in the response body.
@@ -35,15 +35,6 @@ export async function toSessionUser(userId: string): Promise<SessionUser> {
   });
   if (!user) throw notFound('User');
 
-  let avatarUrl: string | null = null;
-  if (user.avatarPath) {
-    try {
-      avatarUrl = await storage.createSignedReadUrl(user.avatarPath);
-    } catch {
-      avatarUrl = null;
-    }
-  }
-
   return {
     id: user.id,
     username: user.username,
@@ -51,7 +42,7 @@ export async function toSessionUser(userId: string): Promise<SessionUser> {
     role: user.role as Role,
     mustChangePassword: user.mustChangePassword,
     language: user.language,
-    avatarUrl,
+    avatarUrl: await signAvatar(user.avatarPath),
     teacherId: user.teacher?.id ?? null,
     parentId: user.parent?.id ?? null,
   };
@@ -224,13 +215,135 @@ export async function resetPassword(targetUserId: string, actorId: string) {
   return { username: target.username, fullName: target.fullName, tempPassword };
 }
 
+/**
+ * Changes the sign-in name. The username is the account: it keys the Supabase
+ * Auth email alias (AD-02), so both sides move together or neither does.
+ */
+export async function renameUser(targetUserId: string, username: string, actorId: string): Promise<void> {
+  const normalized = username.toLowerCase();
+
+  const user = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { username: true, fullName: true },
+  });
+  if (!user) throw notFound('User');
+  if (user.username === normalized) return;
+
+  const taken = await prisma.user.findUnique({ where: { username: normalized }, select: { id: true } });
+  if (taken) throw conflict('That username is already taken.');
+
+  const emailAlias = usernameToEmail(normalized);
+  const { error } = await supabaseAdmin().auth.admin.updateUserById(targetUserId, {
+    email: emailAlias,
+    email_confirm: true,
+    user_metadata: { username: normalized, full_name: user.fullName },
+  });
+  if (error) {
+    throw new AppError(502, 'AUTH_ERROR', `Could not update the sign-in name: ${error.message}`);
+  }
+
+  await prisma.user.update({
+    where: { id: targetUserId },
+    data: { username: normalized, emailAlias },
+  });
+
+  await audit({
+    actorId,
+    action: 'USER_RENAMED',
+    entity: 'User',
+    entityId: targetUserId,
+    before: { username: user.username },
+    after: { username: normalized },
+  });
+}
+
+/** Long enough to be permanent; GoTrue has no "forever". */
+const BAN_INDEFINITELY = '876000h';
+
+/**
+ * Takes the credentials away rather than merely flagging the row.
+ *
+ * The status check in requireAuth already refuses a deactivated user, but a
+ * password that still works is a credential still in circulation. Replacing it
+ * with an unguessable value and banning the auth user closes both the password
+ * and any live session.
+ */
+async function revokeCredentials(targetUserId: string): Promise<void> {
+  const { error } = await supabaseAdmin().auth.admin.updateUserById(targetUserId, {
+    password: randomBytes(24).toString('base64url'),
+    ban_duration: BAN_INDEFINITELY,
+  });
+  if (error) {
+    throw new AppError(502, 'AUTH_ERROR', `Could not remove the sign-in credentials: ${error.message}`);
+  }
+  await prisma.user.update({ where: { id: targetUserId }, data: { mustChangePassword: true } });
+}
+
+/** The mirror image: a reactivated account needs credentials issued afresh. */
+async function restoreCredentials(targetUserId: string): Promise<string> {
+  const tempPassword = generateTempPassword();
+  const { error } = await supabaseAdmin().auth.admin.updateUserById(targetUserId, {
+    password: tempPassword,
+    ban_duration: 'none',
+  });
+  if (error) {
+    throw new AppError(502, 'AUTH_ERROR', `Could not restore the sign-in account: ${error.message}`);
+  }
+  await prisma.user.update({ where: { id: targetUserId }, data: { mustChangePassword: true } });
+  return tempPassword;
+}
+
+/**
+ * Deactivating removes access; it never removes work. Everything the person
+ * authored — class records, learning updates, observations — is history of a
+ * child's progress and stays exactly where it is (BR-09).
+ *
+ * Returns fresh credentials when an account is switched back on, because
+ * deactivation destroyed the old ones. They are shown once, to the admin.
+ */
 export async function setUserStatus(
   targetUserId: string,
   status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED',
   actorId: string,
-) {
+): Promise<{
+  user: { id: string; username: string; status: string };
+  credentials: { username: string; tempPassword: string } | null;
+}> {
   if (targetUserId === actorId) throw badRequest('You cannot change your own account status.');
+
+  const existing = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { username: true, status: true },
+  });
+  if (!existing) throw notFound('User');
+
+  // Credentials move first, so a failure here leaves the account no more
+  // reachable than it was. Both branches are safe to retry.
+  let credentials: { username: string; tempPassword: string } | null = null;
+  if (status === 'ACTIVE' && existing.status !== 'ACTIVE') {
+    credentials = { username: existing.username, tempPassword: await restoreCredentials(targetUserId) };
+  } else if (status !== 'ACTIVE' && existing.status === 'ACTIVE') {
+    await revokeCredentials(targetUserId);
+  }
+
   const user = await prisma.user.update({ where: { id: targetUserId }, data: { status } });
-  await audit({ actorId, action: 'USER_STATUS_CHANGED', entity: 'User', entityId: targetUserId, after: { status } });
-  return user;
+
+  // A deactivated account cannot act on a reset request, so the outstanding
+  // issue goes with it.
+  if (status !== 'ACTIVE') {
+    await prisma.notification.deleteMany({
+      where: { type: 'PASSWORD_RESET_REQUEST', payload: { path: ['userId'], equals: targetUserId } },
+    });
+  }
+
+  await audit({
+    actorId,
+    action: 'USER_STATUS_CHANGED',
+    entity: 'User',
+    entityId: targetUserId,
+    before: { status: existing.status },
+    after: { status },
+  });
+
+  return { user, credentials };
 }

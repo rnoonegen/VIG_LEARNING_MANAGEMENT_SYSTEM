@@ -65,7 +65,7 @@ export function TeachersPage() {
                 to={`/admin/teachers/${teacher.id}`}
                 className="touch-target flex items-center gap-3 px-4 py-3.5 hover:bg-lavender-2"
               >
-                <Avatar name={teacher.fullName} size={40} />
+                <Avatar name={teacher.fullName} url={teacher.avatarUrl} size={40} />
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-ink">{teacher.fullName}</p>
@@ -84,11 +84,21 @@ export function TeachersPage() {
                     )}
                   </div>
                   <p className="mt-1 text-xs text-ink-2">
-                    {teacher.availableToday ? `Available today · ${teacher.availableToday}` : 'Not available today'}
+                    {teacher.status !== 'ACTIVE'
+                      ? 'No access · past records kept'
+                      : teacher.availableToday
+                        ? `Available today · ${teacher.availableToday}`
+                        : 'Not available today'}
                   </p>
                 </div>
 
-                {teacher.availableToday ? <Pill token="green">Available</Pill> : <Pill token="muted">Off</Pill>}
+                {teacher.status !== 'ACTIVE' ? (
+                  <Pill token="muted">Inactive</Pill>
+                ) : teacher.availableToday ? (
+                  <Pill token="green">Available</Pill>
+                ) : (
+                  <Pill token="muted">Off</Pill>
+                )}
                 <ChevronRight size={16} className="shrink-0 text-ink-3" />
               </Link>
             </Card>

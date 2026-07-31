@@ -137,8 +137,10 @@ adminUsersRouter.patch(
   '/:id/status',
   validateBody(z.object({ status: z.enum(USER_STATUSES) })),
   handler(async (req, res) => {
-    const user = await service.setUserStatus(req.params.id, req.body.status, auth(req).userId);
-    return ok(res, { id: user.id, status: user.status });
+    const result = await service.setUserStatus(req.params.id, req.body.status, auth(req).userId);
+    // `credentials` is present only when an account was switched back on, and is
+    // the only time that password is ever visible.
+    return ok(res, { id: result.user.id, status: result.user.status, credentials: result.credentials });
   }),
 );
 

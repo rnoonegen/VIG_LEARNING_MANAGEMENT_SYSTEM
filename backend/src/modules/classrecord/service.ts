@@ -6,7 +6,7 @@ import { audit } from '../../lib/audit.js';
 import { container } from '../../ai/container.js';
 import { toOccurrenceDto } from '../scheduling/service.js';
 import { skillsForLevel } from '../curriculum/service.js';
-import { signMany } from '../../lib/storage.js';
+import { avatarStorage, signMany } from '../../lib/storage.js';
 
 /**
  * The class record is where the whole product converges (BR-01): attendance, the
@@ -50,6 +50,7 @@ export async function getContext(occurrenceId: string): Promise<ClassContextDto>
     }),
     signMany(
       occurrence.class.students.map((cs) => cs.student.avatarPath).filter((p): p is string => Boolean(p)),
+      avatarStorage,
     ),
   ]);
 

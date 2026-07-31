@@ -5,7 +5,7 @@ import type { Tx } from '../../prisma.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { createUser } from '../../auth/service.js';
-import { storage } from '../../lib/storage.js';
+import { signAvatar } from '../../lib/storage.js';
 
 /**
  * Adding a student means making them teachable and schedulable, not just naming
@@ -36,15 +36,6 @@ function mapSubjectLevels(student: StudentWithRelations): StudentSubjectLevelDto
   }));
 }
 
-async function avatarUrlFor(path: string | null): Promise<string | null> {
-  if (!path) return null;
-  try {
-    return await storage.createSignedReadUrl(path);
-  } catch {
-    return null;
-  }
-}
-
 export async function listStudents(scope: string[] | 'ALL'): Promise<StudentSummaryDto[]> {
   const students = await prisma.student.findMany({
     where: {
@@ -61,7 +52,7 @@ export async function listStudents(scope: string[] | 'ALL'): Promise<StudentSumm
       fullName: s.fullName,
       gradeLabel: s.gradeLabel,
       status: s.status,
-      avatarUrl: await avatarUrlFor(s.avatarPath),
+      avatarUrl: await signAvatar(s.avatarPath),
       subjectLevels: mapSubjectLevels(s),
     })),
   );
@@ -76,7 +67,7 @@ export async function getStudent(studentId: string): Promise<StudentDto> {
     fullName: student.fullName,
     gradeLabel: student.gradeLabel,
     status: student.status,
-    avatarUrl: await avatarUrlFor(student.avatarPath),
+    avatarUrl: await signAvatar(student.avatarPath),
     subjectLevels: mapSubjectLevels(student),
     dateOfBirth: student.dateOfBirth?.toISOString().slice(0, 10) ?? null,
     joinedAt: student.joinedAt?.toISOString().slice(0, 10) ?? null,

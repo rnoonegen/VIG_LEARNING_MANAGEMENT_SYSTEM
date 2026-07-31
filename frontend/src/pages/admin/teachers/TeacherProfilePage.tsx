@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarPlus, Check, Plus, Trash2 } from 'lucide-react';
-import type { SubjectDto, TeacherDto } from '@vig/shared';
-import { formatShortDate, formatTime12h } from '@vig/shared';
-import { del, errorMessage, get, post, put } from '@/lib/api';
+import { CalendarPlus, Camera, Check, Pencil, Plus, Trash2, UserCheck, UserMinus } from 'lucide-react';
+import type { SubjectDto, TeacherDto, TeacherStatusResultDto } from '@vig/shared';
+import { AVATAR_MAX_BYTES, AVATAR_MIME_TYPES, formatShortDate, formatTime12h } from '@vig/shared';
+import { del, errorMessage, get, patch, post, put } from '@/lib/api';
 import { Avatar, DetailRow, PageHeader, Section, Tabs } from '@/components/ui/Layout';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
@@ -13,6 +13,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, Input, Select, Toggle } from '@/components/ui/Field';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
 import { AvailabilityGrid, fromDayRows, toDayRows, type DayAvailability } from '@/components/AvailabilityGrid';
+import { TempPasswordModal } from './TeachersPage';
 
 type Tab = 'overview' | 'teaching' | 'availability';
 
@@ -23,6 +24,8 @@ type Tab = 'overview' | 'teaching' | 'availability';
 export function TeacherProfilePage() {
   const { teacherId = '' } = useParams();
   const [tab, setTab] = useState<Tab>('overview');
+  const [editing, setEditing] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['teachers', teacherId],
@@ -32,18 +35,43 @@ export function TeacherProfilePage() {
   if (isLoading) return <LoadingState rows={5} />;
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />;
 
+  const active = data.status === 'ACTIVE';
+
   return (
     <div>
       <PageHeader backTo="/admin/teachers" backLabel="Back to Teachers" title={data.fullName} />
 
-      <div className="mb-6 flex items-center gap-3">
-        <Avatar name={data.fullName} size={56} />
-        <div>
-          <p className="text-sm font-medium text-ink">{data.fullName}</p>
-          <p className="text-xs text-ink-2">@{data.username}</p>
+      <Card className="mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          <AvatarEditor teacher={data} onError={setPhotoError} />
+
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-ink">{data.fullName}</p>
+            <p className="text-xs text-ink-2">@{data.username}</p>
+            <div className="mt-2">
+              <Pill token={active ? 'green' : 'muted'}>{active ? 'Active' : 'Inactive'}</Pill>
+            </div>
+          </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Pencil size={13} />}
+            onClick={() => setEditing(true)}
+          >
+            Edit details
+          </Button>
         </div>
-        <Pill token={data.status === 'ACTIVE' ? 'green' : 'muted'}>{data.status.toLowerCase()}</Pill>
-      </div>
+
+        {photoError ? <p className="mt-3 text-xs text-danger">{photoError}</p> : null}
+
+        {!active ? (
+          <p className="mt-4 rounded-[12px] bg-lavender-2 px-4 py-3 text-xs text-ink-2">
+            This teacher cannot sign in and will not be offered new classes. Everything they recorded —
+            class notes, learning updates and observations — is kept.
+          </p>
+        ) : null}
+      </Card>
 
       <Tabs
         active={tab}
@@ -58,7 +86,203 @@ export function TeacherProfilePage() {
       {tab === 'overview' ? <Overview teacher={data} /> : null}
       {tab === 'teaching' ? <Capabilities teacher={data} /> : null}
       {tab === 'availability' ? <Availability teacher={data} /> : null}
+
+      {editing ? <EditTeacherModal teacher={data} onClose={() => setEditing(false)} /> : null}
     </div>
+  );
+}
+
+interface UploadTarget {
+  path: string;
+  uploadUrl: string;
+  token: string;
+}
+
+/**
+ * The photo goes straight from here to the private avatars bucket; the API only
+ * ever handles the resulting path (AD-04). Reads come back as signed URLs.
+ */
+function AvatarEditor({
+  teacher,
+  onError,
+}: {
+  teacher: TeacherDto;
+  onError: (message: string | null) => void;
+}) {
+  const queryClient = useQueryClient();
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['teachers'] });
+
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const target = await post<UploadTarget>(`/teachers/${teacher.id}/avatar-upload-url`, {
+        fileName: file.name,
+        mimeType: file.type,
+      });
+
+      const response = await fetch(target.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+      if (!response.ok) throw new Error('The photo did not finish uploading. Please try again.');
+
+      return put(`/teachers/${teacher.id}/avatar`, { storagePath: target.path });
+    },
+    onSuccess: async () => {
+      onError(null);
+      await refresh();
+    },
+    onError: (err) => onError(errorMessage(err)),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => del(`/teachers/${teacher.id}/avatar`),
+    onSuccess: async () => {
+      onError(null);
+      await refresh();
+    },
+    onError: (err) => onError(errorMessage(err)),
+  });
+
+  const choose = (file: File | null) => {
+    if (!file) return;
+    // Checked here as well as in the bucket policy, so the answer arrives before
+    // the bytes do.
+    if (!AVATAR_MIME_TYPES.includes(file.type as (typeof AVATAR_MIME_TYPES)[number])) {
+      onError('Use a JPEG, PNG or WebP image.');
+      return;
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      onError('That photo is larger than 5 MB. Choose a smaller one.');
+      return;
+    }
+    upload.mutate(file);
+  };
+
+  const busy = upload.isPending || remove.isPending;
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative">
+        <Avatar name={teacher.fullName} url={teacher.avatarUrl} size={64} />
+        <button
+          type="button"
+          onClick={() => fileInput.current?.click()}
+          disabled={busy}
+          aria-label={teacher.avatarUrl ? 'Change photo' : 'Add photo'}
+          className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-card text-violet transition-colors hover:bg-lavender disabled:text-ink-3"
+        >
+          <Camera size={14} />
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept={AVATAR_MIME_TYPES.join(',')}
+          className="hidden"
+          onChange={(e) => {
+            choose(e.target.files?.[0] ?? null);
+            // Reset, so choosing the same file twice still fires a change.
+            e.target.value = '';
+          }}
+        />
+      </div>
+
+      {upload.isPending ? (
+        <span className="text-[11px] text-ink-2">Uploading…</span>
+      ) : teacher.avatarUrl ? (
+        <button
+          type="button"
+          onClick={() => remove.mutate()}
+          disabled={busy}
+          className="text-[11px] text-ink-2 underline hover:text-danger disabled:text-ink-3"
+        >
+          Remove
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Name and username. The username is how they sign in, so changing it changes
+ * their login — the form says so rather than letting them find out.
+ */
+function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [fullName, setFullName] = useState(teacher.fullName);
+  const [username, setUsername] = useState(teacher.username);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () =>
+      patch(`/teachers/${teacher.id}`, {
+        ...(fullName.trim() !== teacher.fullName ? { fullName: fullName.trim() } : {}),
+        ...(username.trim() !== teacher.username ? { username: username.trim() } : {}),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['teachers'] });
+      onClose();
+    },
+    onError: (err) => setError(errorMessage(err)),
+  });
+
+  const changed = fullName.trim() !== teacher.fullName || username.trim() !== teacher.username;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit details"
+      description="Their name as it appears across VIG, and the username they sign in with."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => save.mutate()}
+            disabled={!fullName.trim() || !username.trim() || !changed || save.isPending}
+          >
+            {save.isPending ? 'Saving…' : 'Save Changes'}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <Field label="Full name" htmlFor="teacher-full-name" required>
+          <Input
+            id="teacher-full-name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            autoFocus
+          />
+        </Field>
+
+        <Field
+          label="Username"
+          htmlFor="teacher-username-edit"
+          required
+          error={error}
+          hint="Lowercase letters, numbers, dot, underscore and hyphen only."
+        >
+          <Input
+            id="teacher-username-edit"
+            value={username}
+            onChange={(e) => setUsername(e.target.value.toLowerCase())}
+            autoCapitalize="none"
+            spellCheck={false}
+          />
+        </Field>
+
+        {username.trim() !== teacher.username ? (
+          <p className="rounded-[12px] bg-warning-bg px-3 py-2.5 text-xs text-ink-2">
+            They sign in with this username. Tell them the new one — their password does not change.
+          </p>
+        ) : null}
+      </div>
+    </Modal>
   );
 }
 
@@ -67,6 +291,8 @@ function Overview({ teacher }: { teacher: TeacherDto }) {
 
   return (
     <>
+      <Account teacher={teacher} />
+
       <Section title="Teaching">
         <Card>
           {teacher.capabilities.length === 0 ? (
@@ -111,6 +337,161 @@ function Overview({ teacher }: { teacher: TeacherDto }) {
         </Card>
       </Section>
     </>
+  );
+}
+
+/**
+ * A teacher is never deleted (BR-09). Deactivating ends their access; the work
+ * they recorded about a child stays, because that history is the child's, not
+ * theirs.
+ */
+function Account({ teacher }: { teacher: TeacherDto }) {
+  const [confirming, setConfirming] = useState(false);
+  const [credentials, setCredentials] = useState<{ username: string; tempPassword: string } | null>(null);
+  const active = teacher.status === 'ACTIVE';
+
+  return (
+    <Section title="Account">
+      <Card>
+        <dl>
+          <DetailRow label="Username" value={`@${teacher.username}`} />
+          <DetailRow label="Sign-in" value={active ? 'Enabled' : 'Removed'} />
+          <DetailRow label="Upcoming classes" value={teacher.upcomingClassCount} />
+        </dl>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          {active ? (
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<UserMinus size={13} />}
+              onClick={() => setConfirming(true)}
+            >
+              Deactivate Teacher
+            </Button>
+          ) : (
+            <Button size="sm" icon={<UserCheck size={13} />} onClick={() => setConfirming(true)}>
+              Reactivate Teacher
+            </Button>
+          )}
+
+          <p className="max-w-md text-xs text-ink-2">
+            {active
+              ? 'Removes their sign-in and stops them being scheduled. Their class records, learning updates and observations stay.'
+              : 'Restores access with a new temporary password, and lets them be scheduled again.'}
+          </p>
+        </div>
+      </Card>
+
+      {confirming ? (
+        <StatusModal
+          teacher={teacher}
+          next={active ? 'INACTIVE' : 'ACTIVE'}
+          onClose={() => setConfirming(false)}
+          onDone={(issued) => {
+            setConfirming(false);
+            if (issued) setCredentials(issued);
+          }}
+        />
+      ) : null}
+
+      {credentials ? (
+        <TempPasswordModal
+          created={credentials}
+          title="Access restored"
+          onClose={() => setCredentials(null)}
+        />
+      ) : null}
+    </Section>
+  );
+}
+
+function StatusModal({
+  teacher,
+  next,
+  onClose,
+  onDone,
+}: {
+  teacher: TeacherDto;
+  next: 'ACTIVE' | 'INACTIVE';
+  onClose: () => void;
+  onDone: (credentials: { username: string; tempPassword: string } | null) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const deactivating = next === 'INACTIVE';
+
+  const change = useMutation({
+    mutationFn: () => patch<TeacherStatusResultDto>(`/teachers/${teacher.id}/status`, { status: next }),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ['teachers'] });
+      await queryClient.invalidateQueries({ queryKey: ['schedule'] });
+      onDone(result.credentials);
+    },
+    onError: (err) => setError(errorMessage(err)),
+  });
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={deactivating ? `Deactivate ${teacher.fullName}?` : `Reactivate ${teacher.fullName}?`}
+      description={
+        deactivating
+          ? 'They lose access straight away. Nothing they recorded is deleted.'
+          : 'They can sign in and teach again once you pass on the new password.'
+      }
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={change.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant={deactivating ? 'danger' : 'primary'}
+            onClick={() => change.mutate()}
+            disabled={change.isPending}
+          >
+            {change.isPending
+              ? deactivating
+                ? 'Deactivating…'
+                : 'Reactivating…'
+              : deactivating
+                ? 'Deactivate'
+                : 'Reactivate'}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3 text-sm text-ink-2">
+        {deactivating ? (
+          <>
+            <ul className="flex list-disc flex-col gap-1.5 pl-5">
+              <li>Their username and password stop working immediately.</li>
+              <li>They will not be offered as a teacher when scheduling new classes.</li>
+              <li>
+                Everything they recorded stays: class records, student learning updates, development
+                observations and moments.
+              </li>
+            </ul>
+
+            {teacher.upcomingClassCount > 0 ? (
+              <p className="rounded-[12px] bg-warning-bg px-3 py-2.5 text-xs text-ink-2">
+                {teacher.upcomingClassCount} upcoming{' '}
+                {teacher.upcomingClassCount === 1 ? 'class is' : 'classes are'} still assigned to them.
+                Those stay on the schedule — reassign or cancel them from Schedule.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="rounded-[12px] bg-lavender-2 px-3 py-2.5 text-xs text-ink-2">
+            Deactivating removed their password, so a new temporary one is created now. It is shown once —
+            pass it to them directly.
+          </p>
+        )}
+
+        {error ? <p className="text-xs text-danger">{error}</p> : null}
+      </div>
+    </Modal>
   );
 }
 

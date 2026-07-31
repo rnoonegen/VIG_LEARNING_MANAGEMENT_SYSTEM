@@ -18,6 +18,7 @@ import type {
   SkillStatus,
   StudentStatus,
   UpdateSource,
+  UserStatus,
   WeeklyUpdateItemType,
   WeeklyUpdateStatus,
 } from './enums.js';
@@ -130,11 +131,14 @@ export interface TeacherDto {
   userId: string;
   fullName: string;
   username: string;
-  status: string;
+  status: UserStatus;
+  avatarUrl: string | null;
   notes: string | null;
   capabilities: CapabilityDto[];
   availability: AvailabilitySlotDto[];
   exceptions: ExceptionDto[];
+  /** Classes still on the calendar for them — what deactivation leaves behind. */
+  upcomingClassCount: number;
 }
 
 export interface TeacherSummaryDto {
@@ -142,9 +146,19 @@ export interface TeacherSummaryDto {
   userId: string;
   fullName: string;
   username: string;
-  status: string;
+  status: UserStatus;
+  avatarUrl: string | null;
   subjects: Array<{ name: string; levelRange: string; colorToken: string }>;
   availableToday: string | null;
+}
+
+/**
+ * Reactivation issues fresh credentials, because deactivation destroyed the old
+ * ones. The password is in the response body once and never again (AD-09).
+ */
+export interface TeacherStatusResultDto {
+  teacher: TeacherDto;
+  credentials: { username: string; tempPassword: string } | null;
 }
 
 // --- Students ---------------------------------------------------------------
