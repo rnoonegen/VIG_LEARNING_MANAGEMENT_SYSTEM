@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Check, ChevronLeft, Plus, X } from 'lucide-react';
+import { Check, ChevronLeft, Lock, Plus, X } from 'lucide-react';
 import type { AttendanceStatus, ClassContextDto, SkillStatus } from '@vig/shared';
 import {
   ATTENDANCE_META,
@@ -10,6 +10,7 @@ import {
   formatInstantTime,
   formatShortDate,
   NOT_COVERED_STATUS,
+  SCHOOL_TIMEZONE,
 } from '@vig/shared';
 import { errorMessage, get, post, put } from '@/lib/api';
 import { Avatar } from '@/components/ui/Layout';
@@ -190,6 +191,61 @@ export function ClassRecordPage() {
     );
   }
 
+  // --- Closed to further recording ------------------------------------------
+  //
+  // A class is recorded once, between its start and the next morning. Both
+  // outcomes are dead ends for the teacher, so the page says so plainly instead
+  // of offering a form the API will reject on save.
+  if (data.record.state === 'SAVED' || data.record.state === 'CLOSED') {
+    const wasSaved = data.record.state === 'SAVED';
+    return (
+      <FullScreen>
+        <button
+          type="button"
+          onClick={() => navigate('/teacher')}
+          className="mb-4 inline-flex items-center gap-1 text-xs font-medium text-violet hover:underline"
+        >
+          <ChevronLeft size={14} />
+          Back to Today
+        </button>
+
+        <Card
+          tone={wasSaved ? 'success' : 'warning'}
+          className="flex flex-col items-center gap-3 py-10 text-center"
+        >
+          <div
+            className={cn(
+              'flex h-14 w-14 items-center justify-center rounded-full text-white',
+              wasSaved ? 'bg-success' : 'bg-warning',
+            )}
+          >
+            {wasSaved ? <Check size={26} strokeWidth={3} /> : <Lock size={24} />}
+          </div>
+
+          <h2>{wasSaved ? 'Already recorded' : 'Recording has closed'}</h2>
+
+          <p className="max-w-sm text-sm text-ink-2">
+            {wasSaved
+              ? `${data.occurrence.subjectName} on ${formatShortDate(
+                  new Date(data.occurrence.scheduledStart),
+                )} was recorded${
+                  data.record.savedAt
+                    ? ` on ${formatShortDate(new Date(data.record.savedAt), SCHOOL_TIMEZONE)}`
+                    : ''
+                }. A class is recorded once, so it cannot be written again.`
+              : `The deadline for ${data.occurrence.subjectName} on ${formatShortDate(
+                  new Date(data.occurrence.scheduledStart),
+                )} passed at ${data.record.closesAtLabel}. Tell an administrator if this class still needs recording.`}
+          </p>
+
+          <Button variant="secondary" onClick={() => navigate('/teacher')}>
+            Back to Classes
+          </Button>
+        </Card>
+      </FullScreen>
+    );
+  }
+
   // --- Before class ---------------------------------------------------------
   if (!started) {
     return (
@@ -236,7 +292,18 @@ export function ClassRecordPage() {
           )}
         </Card>
 
-        <Button fullWidth onClick={() => setStarted(true)}>
+        {/* The deadline is stated before they begin, not discovered afterwards. */}
+        <p className="mb-3 rounded-[12px] bg-lavender-2 px-3 py-2.5 text-xs text-ink-2">
+          {data.record.state === 'NOT_YET_OPEN'
+            ? 'This class has not started yet. You can record it once it begins.'
+            : `Record this class by ${data.record.closesAtLabel}. After that it cannot be recorded, and it counts as missed.`}
+        </p>
+
+        <Button
+          fullWidth
+          onClick={() => setStarted(true)}
+          disabled={data.record.state === 'NOT_YET_OPEN'}
+        >
           Start Class
         </Button>
       </FullScreen>

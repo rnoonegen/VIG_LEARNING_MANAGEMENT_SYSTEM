@@ -215,7 +215,19 @@ export interface TeacherSummaryDto {
   username: string;
   status: UserStatus;
   avatarUrl: string | null;
-  subjects: Array<{ name: string; levelRange: string; colorToken: string }>;
+  /**
+   * What they are assigned to teach. The ids and level orders are here so a
+   * caller can tell whether this teacher covers a specific subject and level —
+   * scheduling must not offer a teacher the engine will then reject.
+   */
+  subjects: Array<{
+    subjectId: string;
+    name: string;
+    levelRange: string;
+    colorToken: string;
+    minLevelOrder: number;
+    maxLevelOrder: number;
+  }>;
   availableToday: string | null;
 }
 
@@ -246,6 +258,16 @@ export interface StudentSummaryDto {
   status: StudentStatus;
   avatarUrl: string | null;
   subjectLevels: StudentSubjectLevelDto[];
+  /**
+   * Set for a teacher: the subset of `subjectLevels` they are assigned to teach
+   * this child. Absent for an admin or a parent, who are not scoped by subject.
+   */
+  taughtSubjectLevels?: StudentSubjectLevelDto[];
+  /**
+   * Set for a teacher: whether this child is already on their schedule. False
+   * means the subject is theirs but no class has been created yet.
+   */
+  hasScheduledClass?: boolean;
 }
 
 export interface StudentDto extends StudentSummaryDto {
@@ -253,9 +275,68 @@ export interface StudentDto extends StudentSummaryDto {
   joinedAt: string | null;
   notes: string | null;
   availability: AvailabilitySlotDto[];
-  parents: Array<{ parentId: string; userId: string; fullName: string; relationship: string | null }>;
+  parents: Array<{
+    parentId: string;
+    userId: string;
+    fullName: string;
+    /** Their sign-in name, so the admin can pass on or reset credentials. */
+    username: string;
+    relationship: string | null;
+  }>;
   /** True once the student has subjects, a level per subject and availability. */
   setupComplete: boolean;
+}
+
+/** A class this student is in — who teaches them, and when. */
+export interface StudentClassDto {
+  classId: string;
+  subjectId: string;
+  subjectName: string;
+  colorToken: string;
+  levelId: string;
+  levelName: string;
+  teacherId: string;
+  teacherName: string;
+  daysOfWeek: number[];
+  startTime: string;
+  durationMinutes: number;
+  /** The next scheduled occurrence, or null once the class has run its course. */
+  nextOccurrence: string | null;
+  studentCount: number;
+}
+
+/** An existing class the student could be added to, rather than creating another. */
+export interface JoinableClassDto {
+  classId: string;
+  teacherId: string;
+  teacherName: string;
+  daysOfWeek: number[];
+  startTime: string;
+  durationMinutes: number;
+  studentCount: number;
+  /** Non-empty means the join is refused; the reasons say why. */
+  blockers: string[];
+  /** Accepted with a caveat — the same caveat Needs Attention reports. */
+  warnings: string[];
+}
+
+/**
+ * Who teaches this child, per subject.
+ *
+ * A subject assigned but with no class is the gap between "the school says they
+ * study this" and "somebody is actually teaching it" — so it is reported here as
+ * a first-class result, not inferred from an empty list.
+ */
+export interface StudentTeachingDto {
+  classes: StudentClassDto[];
+  unassigned: Array<{
+    subjectId: string;
+    subjectName: string;
+    colorToken: string;
+    levelId: string;
+    levelName: string;
+    joinable: JoinableClassDto[];
+  }>;
 }
 
 // --- Scheduling -------------------------------------------------------------
@@ -269,6 +350,12 @@ export interface SlotOptionDto {
   score: number;
   checks: Array<{ label: string; passed: boolean }>;
 }
+
+/**
+ * Where a class stands for recording: not yet startable, writable now, written,
+ * or past its deadline and permanently unwritten (BR-01/BR-19).
+ */
+export type RecordState = 'NOT_YET_OPEN' | 'OPEN' | 'CLOSED' | 'SAVED';
 
 export interface OccurrenceDto {
   id: string;
@@ -284,6 +371,10 @@ export interface OccurrenceDto {
   studentNames: string[];
   hasClassRecord: boolean;
   classRecordStatus: ClassRecordStatus | null;
+  /** Whether this class can still be recorded, and whether it already was. */
+  recordState: RecordState;
+  /** When recording closes for this class — the teacher's deadline. */
+  recordClosesAt: string;
 }
 
 export interface ClassContextDto {
@@ -303,6 +394,23 @@ export interface ClassContextDto {
   /** studentId → sub-heading ids already covered, so the grid opens pre-ticked. */
   covered: Record<string, string[]>;
   developmentAreas: Array<{ id: string; name: string; category: DevCategory }>;
+  /**
+   * Whether this class can be recorded right now. The page renders from this
+   * rather than letting a teacher fill in a form the API will then refuse.
+   */
+  record: {
+    state: RecordState;
+    opensAt: string;
+    closesAt: string;
+    /**
+     * The deadline as the school reads it, e.g. "9:00 AM on 6 Aug 2026".
+     * Built server-side: clock times are stored as school-local wall clock in UTC
+     * fields (BR-20), so rendering the instant in the browser's or the school's
+     * zone would shift a 9:00 AM cutoff to a different hour.
+     */
+    closesAtLabel: string;
+    savedAt: string | null;
+  };
 }
 
 // --- Home & attention -------------------------------------------------------
@@ -341,8 +449,19 @@ export interface TeacherHomeDto {
   greetingName: string;
   today: string;
   todaysClasses: OccurrenceDto[];
+  /** Finished, unwritten, and still inside the deadline — actionable now. */
   recordsDue: OccurrenceDto[];
   upcoming: OccurrenceDto[];
+  /**
+   * Classes whose recording deadline passed with nothing written. Shown to the
+   * teacher as a standing count, because the work cannot be recovered and the
+   * only thing left is to not repeat it.
+   */
+  missedRecords: {
+    total: number;
+    /** The most recent few, newest first. */
+    recent: OccurrenceDto[];
+  };
 }
 
 // --- Learning ---------------------------------------------------------------
@@ -442,6 +561,12 @@ export interface ParentChildDto {
   gradeLabel: string | null;
   avatarUrl: string | null;
   relationship: string | null;
+  /**
+   * What the school has this child studying right now. A subject added by the
+   * admin shows here immediately, before any progress has been recorded against
+   * it — otherwise a parent has no way to know the subject exists.
+   */
+  subjectLevels: StudentSubjectLevelDto[];
 }
 
 export interface ParentHomeDto {

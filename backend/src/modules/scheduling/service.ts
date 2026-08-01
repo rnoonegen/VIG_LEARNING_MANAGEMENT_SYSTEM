@@ -1,5 +1,11 @@
 import type { Prisma } from '@prisma/client';
-import type { ConfirmScheduleInput, OccurrenceDto, ScheduleOptionsInput, SlotOptionDto } from '@vig/shared';
+import type {
+  ConfirmScheduleInput,
+  OccurrenceDto,
+  ScheduleOptionsInput,
+  SlotOptionDto,
+  StudentTeachingDto,
+} from '@vig/shared';
 import { toHHMM, toMinutes } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import type { Tx } from '../../prisma.js';
@@ -8,11 +14,15 @@ import { audit } from '../../lib/audit.js';
 import { notify } from '../notifications/service.js';
 import {
   combineDateAndTime,
+  CONFLICT_HORIZON_WEEKS,
+  diagnoseNoOptions,
   findValidSlots,
   validateMove,
   type RankedSlot,
   type SchedulingSnapshot,
 } from './engine.js';
+import { checkJoin } from './enrolment.js';
+import { recordState, recordWindow } from '../classrecord/window.js';
 
 /** How far ahead occurrences are materialised (AD-05). */
 const HORIZON_DAYS = 120;
@@ -21,7 +31,47 @@ const HORIZON_DAYS = 120;
 // Snapshot loading — the only place the engine touches the database
 // ---------------------------------------------------------------------------
 
-async function loadSnapshot(levelId: string, studentIds: string[]): Promise<SchedulingSnapshot> {
+/** The span of dates a snapshot needs to answer for. */
+interface SnapshotWindow {
+  from: Date;
+  to: Date;
+}
+
+/** `from` through `from` + `days`, as a snapshot window. */
+function windowFrom(from: Date, days: number): SnapshotWindow {
+  const to = new Date(from);
+  to.setUTCDate(to.getUTCDate() + days);
+  return { from, to };
+}
+
+/**
+ * The dates a new-class search can collide with: from the requested start date
+ * over the engine's conflict horizon. Anchored at today when the start date is in
+ * the past, so a stale form does not widen the query to the whole timetable.
+ */
+function searchWindow(startDate: string): SnapshotWindow {
+  const requested = new Date(`${startDate}T00:00:00.000Z`);
+  const now = new Date();
+  const from = requested > now ? requested : now;
+  return windowFrom(from, CONFLICT_HORIZON_WEEKS * 7);
+}
+
+/**
+ * Loads the snapshot the engine reasons over.
+ *
+ * The window matters: the engine only ever checks conflicts inside a bounded
+ * span (CONFLICT_HORIZON_WEEKS for a new class, a week for a proposed move), but
+ * occurrences are materialised 120 days out. Fetching all of them — with the
+ * class and its roster joined — pulled the school's entire future schedule into
+ * memory on every "Find options" click, and once per occurrence inside
+ * proposeMoves. Asking only for the dates that can affect the answer keeps this
+ * flat as the timetable grows.
+ */
+async function loadSnapshot(
+  levelId: string,
+  studentIds: string[],
+  window: SnapshotWindow,
+): Promise<SchedulingSnapshot> {
   const level = await prisma.level.findUnique({ where: { id: levelId }, select: { displayOrder: true } });
   if (!level) throw notFound('Level');
 
@@ -35,7 +85,10 @@ async function loadSnapshot(levelId: string, studentIds: string[]): Promise<Sche
       include: { availability: true },
     }),
     prisma.classOccurrence.findMany({
-      where: { status: 'SCHEDULED', scheduledStart: { gte: new Date() } },
+      where: {
+        status: 'SCHEDULED',
+        scheduledStart: { gte: window.from, lte: window.to },
+      },
       include: { class: { include: { students: { select: { studentId: true } } } } },
     }),
   ]);
@@ -78,9 +131,28 @@ async function loadSnapshot(levelId: string, studentIds: string[]): Promise<Sche
 export async function findOptions(
   input: ScheduleOptionsInput,
   adminId: string,
-): Promise<{ options: Array<SlotOptionDto & { teacherId: string; teacherName: string }>; requestId: string }> {
-  const snapshot = await loadSnapshot(input.levelId, input.studentIds);
+): Promise<{
+  options: Array<SlotOptionDto & { teacherId: string; teacherName: string }>;
+  requestId: string;
+  /** Why the search was empty. Populated only when there are no options. */
+  reasons: string[];
+}> {
+  const snapshot = await loadSnapshot(input.levelId, input.studentIds, searchWindow(input.startDate));
   const options = findValidSlots(input, snapshot);
+
+  // An empty result is not self-explanatory — the admin needs to know which
+  // constraint ruled everything out to know what to change.
+  let reasons: string[] = [];
+  if (options.length === 0) {
+    const level = await prisma.level.findUnique({
+      where: { id: input.levelId },
+      select: { name: true, subject: { select: { name: true } } },
+    });
+    reasons = diagnoseNoOptions(input, snapshot, {
+      subjectName: level?.subject.name ?? 'this subject',
+      levelName: level?.name ?? 'this level',
+    });
+  }
 
   const request = await prisma.schedulingRequest.create({
     data: {
@@ -92,7 +164,7 @@ export async function findOptions(
     },
   });
 
-  return { options, requestId: request.id };
+  return { options, requestId: request.id, reasons };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +238,7 @@ export async function extendHorizon(): Promise<number> {
 
 export async function confirmSchedule(input: ConfirmScheduleInput, adminId: string) {
   // Re-validate rather than trusting the option the client sends back.
-  const snapshot = await loadSnapshot(input.levelId, input.studentIds);
+  const snapshot = await loadSnapshot(input.levelId, input.studentIds, searchWindow(input.startDate));
   const revalidated = findValidSlots(
     {
       studentIds: input.studentIds,
@@ -228,6 +300,181 @@ export async function confirmSchedule(input: ConfirmScheduleInput, adminId: stri
   return getClass(created.id);
 }
 
+/**
+ * Everything a student would inherit by joining a class, and everything they are
+ * already booked into — the two sides of the enrolment check.
+ */
+async function joinContext(classId: string, studentIds: string[]) {
+  const now = new Date();
+
+  const [klass, students, booked] = await Promise.all([
+    prisma.class.findUnique({
+      where: { id: classId },
+      include: { subject: true, level: true, students: { select: { studentId: true } } },
+    }),
+    prisma.student.findMany({
+      where: { id: { in: studentIds } },
+      include: {
+        availability: true,
+        subjectLevels: { where: { isCurrent: true }, include: { level: true } },
+      },
+    }),
+    prisma.classOccurrence.findMany({
+      where: {
+        status: 'SCHEDULED',
+        scheduledStart: { gte: now },
+        class: { students: { some: { studentId: { in: studentIds } } } },
+      },
+      select: {
+        scheduledStart: true,
+        scheduledEnd: true,
+        classId: true,
+        class: { select: { students: { select: { studentId: true } } } },
+      },
+    }),
+  ]);
+  if (!klass) throw notFound('Class');
+
+  const occurrences = await prisma.classOccurrence.findMany({
+    where: { classId, status: 'SCHEDULED', scheduledStart: { gte: now } },
+    select: { scheduledStart: true, scheduledEnd: true },
+    orderBy: { scheduledStart: 'asc' },
+  });
+
+  return { klass, students, booked, occurrences };
+}
+
+/** Runs the enrolment rules for one student against one class. */
+function evaluateJoin(
+  klass: { subject: { name: string }; levelId: string; level: { name: string } },
+  student: {
+    fullName: string;
+    availability: Array<{ weekday: number; startTime: string; endTime: string }>;
+    subjectLevels: Array<{ subjectId: string; levelId: string; level: { name: string } }>;
+  },
+  subjectId: string,
+  occurrences: Array<{ scheduledStart: Date; scheduledEnd: Date }>,
+  booked: Array<{ scheduledStart: Date; scheduledEnd: Date }>,
+) {
+  const current = student.subjectLevels.find((sl) => sl.subjectId === subjectId);
+
+  return checkJoin({
+    studentName: student.fullName,
+    klass: { subjectName: klass.subject.name, levelId: klass.levelId, levelName: klass.level.name },
+    current: current ? { levelId: current.levelId, levelName: current.level.name } : null,
+    studentAvailability: student.availability,
+    occurrences: occurrences.map((o) => ({ start: o.scheduledStart, end: o.scheduledEnd })),
+    booked: booked.map((b) => ({ start: b.scheduledStart, end: b.scheduledEnd })),
+  });
+}
+
+/**
+ * Adds students to a class that already runs.
+ *
+ * They pick up the whole recurrence from here on, including attendance and the
+ * class record — which is the point: this is how a child ends up in front of a
+ * teacher without a second class being created for the same group.
+ */
+export async function addClassStudents(
+  classId: string,
+  input: { studentIds: string[]; acceptWarnings: boolean },
+  actorId: string,
+) {
+  const { klass, students, booked, occurrences } = await joinContext(classId, input.studentIds);
+
+  if (klass.status === 'ARCHIVED') throw badRequest('That class is no longer running.');
+
+  const missing = input.studentIds.filter((id) => !students.some((s) => s.id === id));
+  if (missing.length) throw notFound('Student');
+
+  const alreadyIn = new Set(klass.students.map((cs) => cs.studentId));
+  const joining = students.filter((s) => !alreadyIn.has(s.id));
+  if (joining.length === 0) return { klass: await getClass(classId), warnings: [] };
+
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+
+  for (const student of joining) {
+    const check = evaluateJoin(
+      klass,
+      student,
+      klass.subjectId,
+      occurrences,
+      // Their own bookings only, and never this class's own occurrences.
+      booked.filter(
+        (b) => b.classId !== classId && b.class.students.some((cs) => cs.studentId === student.id),
+      ),
+    );
+    blockers.push(...check.blockers);
+    warnings.push(...check.warnings);
+  }
+
+  if (blockers.length) throw badRequest(blockers.join(' '));
+  if (warnings.length && !input.acceptWarnings) {
+    throw badRequest(`${warnings.join(' ')} Confirm to add them anyway.`);
+  }
+
+  await prisma.classStudent.createMany({
+    data: joining.map((s) => ({ classId, studentId: s.id })),
+    skipDuplicates: true,
+  });
+
+  await audit({
+    actorId,
+    action: 'CLASS_STUDENTS_ADDED',
+    entity: 'Class',
+    entityId: classId,
+    after: { studentIds: joining.map((s) => s.id) },
+  });
+
+  const teacher = await prisma.teacher.findUnique({
+    where: { id: klass.teacherId },
+    select: { userId: true },
+  });
+  if (teacher) {
+    await notify({
+      recipientUserId: teacher.userId,
+      type: 'SCHEDULE_CHANGED',
+      title: joining.length === 1 ? 'A student joined your class' : 'Students joined your class',
+      body: `${joining.map((s) => s.fullName).join(', ')} — ${klass.subject.name}, ${klass.level.name}.`,
+      payload: { classId },
+    });
+  }
+
+  return { klass: await getClass(classId), warnings };
+}
+
+/**
+ * Removes a student from a class going forward.
+ *
+ * Attendance and class records already written name the student directly, so
+ * their history of the classes they did attend is untouched (BR-09).
+ */
+export async function removeClassStudent(classId: string, studentId: string, actorId: string) {
+  const link = await prisma.classStudent.findUnique({
+    where: { classId_studentId: { classId, studentId } },
+  });
+  if (!link) throw notFound('Student in this class');
+
+  const remaining = await prisma.classStudent.count({ where: { classId } });
+  if (remaining <= 1) {
+    throw badRequest(
+      'This is the only student in the class. Cancel the class from the schedule instead of emptying it.',
+    );
+  }
+
+  await prisma.classStudent.delete({ where: { classId_studentId: { classId, studentId } } });
+  await audit({
+    actorId,
+    action: 'CLASS_STUDENT_REMOVED',
+    entity: 'Class',
+    entityId: classId,
+    before: { studentId },
+  });
+
+  return getClass(classId);
+}
+
 export async function getClass(classId: string) {
   const klass = await prisma.class.findUnique({
     where: { id: classId },
@@ -258,6 +505,122 @@ export async function getClass(classId: string) {
     status: klass.status,
     students: klass.students.map((cs) => cs.student),
     occurrenceCount: klass._count.occurrences,
+  };
+}
+
+/**
+ * Who teaches this child, subject by subject — and where nobody does yet.
+ *
+ * Assigning a subject and scheduling a class are two different acts, and the gap
+ * between them is invisible everywhere else: the child simply never appears on a
+ * teacher's list. This read names the gap and offers the classes that already run
+ * for that subject and level, so filling it is one click rather than a new class.
+ */
+export async function getStudentTeaching(studentId: string): Promise<StudentTeachingDto> {
+  const now = new Date();
+
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    include: {
+      availability: true,
+      subjectLevels: {
+        where: { isCurrent: true },
+        include: { subject: true, level: true },
+        orderBy: { subject: { displayOrder: 'asc' } },
+      },
+    },
+  });
+  if (!student) throw notFound('Student');
+
+  const classInclude = {
+    subject: true,
+    level: true,
+    teacher: { include: { user: { select: { fullName: true } } } },
+    _count: { select: { students: true } },
+    occurrences: {
+      where: { status: 'SCHEDULED' as const, scheduledStart: { gte: now } },
+      orderBy: { scheduledStart: 'asc' as const },
+      take: 1,
+      select: { scheduledStart: true },
+    },
+  };
+
+  const enrolled = await prisma.class.findMany({
+    where: { status: { not: 'ARCHIVED' }, students: { some: { studentId } } },
+    include: classInclude,
+    orderBy: { subject: { displayOrder: 'asc' } },
+  });
+
+  const covered = new Set(enrolled.map((c) => c.subjectId));
+  const gaps = student.subjectLevels.filter((sl) => !covered.has(sl.subjectId));
+
+  // Candidates are classes for exactly the subject and level the child is on —
+  // any other level would record coverage against a level they are not studying.
+  const candidates = gaps.length
+    ? await prisma.class.findMany({
+        where: {
+          status: 'ACTIVE',
+          OR: gaps.map((g) => ({ subjectId: g.subjectId, levelId: g.levelId })),
+        },
+        include: {
+          ...classInclude,
+          occurrences: {
+            where: { status: 'SCHEDULED' as const, scheduledStart: { gte: now } },
+            orderBy: { scheduledStart: 'asc' as const },
+            select: { scheduledStart: true, scheduledEnd: true },
+          },
+        },
+      })
+    : [];
+
+  const booked = await prisma.classOccurrence.findMany({
+    where: {
+      status: 'SCHEDULED',
+      scheduledStart: { gte: now },
+      class: { students: { some: { studentId } } },
+    },
+    select: { scheduledStart: true, scheduledEnd: true },
+  });
+
+  return {
+    classes: enrolled.map((c) => ({
+      classId: c.id,
+      subjectId: c.subjectId,
+      subjectName: c.subject.name,
+      colorToken: c.subject.colorToken,
+      levelId: c.levelId,
+      levelName: c.level.name,
+      teacherId: c.teacherId,
+      teacherName: c.teacher.user.fullName,
+      daysOfWeek: c.daysOfWeek,
+      startTime: c.startTime,
+      durationMinutes: c.durationMinutes,
+      nextOccurrence: c.occurrences[0]?.scheduledStart.toISOString() ?? null,
+      studentCount: c._count.students,
+    })),
+    unassigned: gaps.map((gap) => ({
+      subjectId: gap.subjectId,
+      subjectName: gap.subject.name,
+      colorToken: gap.subject.colorToken,
+      levelId: gap.levelId,
+      levelName: gap.level.name,
+      joinable: candidates
+        .filter((c) => c.subjectId === gap.subjectId && c.levelId === gap.levelId)
+        .map((c) => {
+          const check = evaluateJoin(c, student, gap.subjectId, c.occurrences, booked);
+          return {
+            classId: c.id,
+            teacherId: c.teacherId,
+            teacherName: c.teacher.user.fullName,
+            daysOfWeek: c.daysOfWeek,
+            startTime: c.startTime,
+            durationMinutes: c.durationMinutes,
+            studentCount: c._count.students,
+            blockers: check.blockers,
+            warnings: check.warnings,
+          };
+        }),
+    })),
   };
 }
 
@@ -298,7 +661,7 @@ const occurrenceInclude = {
 
 type OccurrenceRow = Prisma.ClassOccurrenceGetPayload<{ include: typeof occurrenceInclude }>;
 
-export function toOccurrenceDto(o: OccurrenceRow): OccurrenceDto {
+export function toOccurrenceDto(o: OccurrenceRow, now = new Date()): OccurrenceDto {
   return {
     id: o.id,
     classId: o.classId,
@@ -313,6 +676,10 @@ export function toOccurrenceDto(o: OccurrenceRow): OccurrenceDto {
     studentNames: o.class.students.map((cs) => cs.student.fullName),
     hasClassRecord: Boolean(o.classRecord && o.classRecord.status === 'SAVED'),
     classRecordStatus: o.classRecord?.status ?? null,
+    // Derived in one place so every timetable — admin, teacher, day view — agrees
+    // on whether a class is still recordable.
+    recordState: recordState(o.scheduledStart, o.classRecord?.status, now),
+    recordClosesAt: recordWindow(o.scheduledStart).closesAt.toISOString(),
   };
 }
 
@@ -329,7 +696,7 @@ export async function getSchedule(from: string, to: string, teacherId?: string):
     include: occurrenceInclude,
     orderBy: { scheduledStart: 'asc' },
   });
-  return occurrences.map(toOccurrenceDto);
+  return occurrences.map((o) => toOccurrenceDto(o));
 }
 
 export async function getOccurrence(occurrenceId: string): Promise<OccurrenceDto> {
@@ -373,10 +740,13 @@ export async function proposeMoves(occurrenceIds: string[]): Promise<ProposedMov
 
   for (const o of occurrences) {
     const studentIds = o.class.students.map((cs) => cs.studentId);
-    const snapshot = await loadSnapshot(o.class.levelId, studentIds);
     const durationMinutes = o.class.durationMinutes;
     const day = new Date(o.scheduledStart);
     day.setUTCHours(0, 0, 0, 0);
+
+    // Alternatives are probed over this day and the following six, so that is
+    // the only span a conflict can come from.
+    const snapshot = await loadSnapshot(o.class.levelId, studentIds, windowFrom(day, 7));
 
     let proposedStart: Date | null = null;
     let reason: string | null = 'No valid alternative was found this week.';
@@ -431,8 +801,14 @@ export async function applyMoves(
     if (!occurrence) continue;
 
     const studentIds = occurrence.class.students.map((cs) => cs.studentId);
-    const snapshot = await loadSnapshot(occurrence.class.levelId, studentIds);
     const start = new Date(move.newStart);
+
+    // A move is validated against its own day only; a day either side covers
+    // anything straddling midnight in the school's timezone.
+    const day = new Date(start);
+    day.setUTCHours(0, 0, 0, 0);
+    day.setUTCDate(day.getUTCDate() - 1);
+    const snapshot = await loadSnapshot(occurrence.class.levelId, studentIds, windowFrom(day, 3));
     const check = validateMove(
       {
         teacherId: occurrence.teacherId,

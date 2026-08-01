@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  diagnoseNoOptions,
   findValidSlots,
   validateMove,
   type SchedulingSnapshot,
@@ -319,5 +320,109 @@ describe('validateMove', () => {
       snapshot(),
     );
     expect(result.valid).toBe(false);
+  });
+});
+
+/**
+ * An empty result has to say which constraint emptied it.
+ *
+ * "No valid times found" sends an admin hunting through availability when the
+ * real cause was a missing teaching capability — the exact dead end that
+ * prompted this: a teacher assigned Maths, asked to take science.
+ */
+describe('diagnoseNoOptions', () => {
+  const LABELS = { subjectName: 'science', levelName: 'L1' };
+
+  /** The reported case: the chosen teacher does not hold the subject at all. */
+  it('names the missing capability when a specific teacher was chosen', () => {
+    const request = { ...REQUEST, subjectId: 'science', teacherId: 'teacher-priya' };
+    const state = snapshot({ levelOrder: 0 });
+
+    expect(findValidSlots(request, state)).toEqual([]);
+
+    const [first, second] = diagnoseNoOptions(request, state, LABELS);
+    expect(first).toMatch(/Priya Sharma is not assigned to teach science at L1/i);
+    expect(first).toMatch(/Teachers → Priya Sharma → Teaching/);
+    // And says plainly that nobody else covers it either.
+    expect(second).toMatch(/No teacher is assigned to science at L1 yet/i);
+  });
+
+  it('points at the teacher who can take it when one exists', () => {
+    const ravi = {
+      ...priya(),
+      teacherId: 'teacher-ravi',
+      fullName: 'Ravi Kumar',
+      capabilities: [{ subjectId: 'science', minLevelOrder: 0, maxLevelOrder: 3, isPrimary: true }],
+    };
+    const request = { ...REQUEST, subjectId: 'science', teacherId: 'teacher-priya' };
+
+    const reasons = diagnoseNoOptions(request, snapshot({ teachers: [priya(), ravi], levelOrder: 0 }), LABELS);
+    expect(reasons[1]).toMatch(/Ravi Kumar can teach it/i);
+  });
+
+  it('reports that nobody holds the subject when no teacher was chosen', () => {
+    const request = { ...REQUEST, subjectId: 'science' };
+    const reasons = diagnoseNoOptions(request, snapshot({ levelOrder: 0 }), LABELS);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toMatch(/No teacher is assigned to teach science at L1/i);
+  });
+
+  it('names the student whose availability is missing', () => {
+    const reasons = diagnoseNoOptions(
+      REQUEST,
+      snapshot({ students: [aarav({ availability: [] })] }),
+      LABELS,
+    );
+    expect(reasons[0]).toMatch(/Aarav Sharma has no weekly availability set/i);
+  });
+
+  it('names the teacher whose availability is missing', () => {
+    const reasons = diagnoseNoOptions(REQUEST, snapshot({ teachers: [priya({ availability: [] })] }), LABELS);
+    expect(reasons[0]).toMatch(/Priya Sharma has no weekly availability set/i);
+  });
+
+  it('reports a total lack of overlap', () => {
+    // Priya mornings, Aarav evenings: both available, never together.
+    const reasons = diagnoseNoOptions(
+      REQUEST,
+      snapshot({
+        teachers: [priya({ availability: [{ weekday: 1, startTime: '08:00', endTime: '10:00' }] })],
+        students: [aarav({ availability: [{ weekday: 1, startTime: '16:00', endTime: '18:00' }] })],
+      }),
+      LABELS,
+    );
+    expect(reasons[0]).toMatch(/no 60-minute window/i);
+  });
+
+  it('reports too few shared days for the requested frequency', () => {
+    // They overlap on Monday only, but the request asks for twice a week.
+    const reasons = diagnoseNoOptions(
+      REQUEST,
+      snapshot({
+        teachers: [priya({ availability: [{ weekday: 1, startTime: '09:00', endTime: '12:00' }] })],
+        students: [aarav({ availability: [{ weekday: 1, startTime: '09:00', endTime: '12:00' }] })],
+      }),
+      LABELS,
+    );
+    expect(reasons[0]).toMatch(/only 1 day a week/i);
+    expect(reasons[0]).toMatch(/asked for 2 times per week/i);
+  });
+
+  it('falls through to clashes once capability and availability are fine', () => {
+    // Every candidate weekday is fully booked for Priya.
+    const booked = MON_TO_FRI.flatMap((weekday) => {
+      const day = new Date(Date.UTC(2026, 7, 2 + weekday));
+      return [
+        {
+          teacherId: 'teacher-priya',
+          studentIds: [] as string[],
+          start: new Date(day.setUTCHours(9, 0, 0, 0)),
+          end: new Date(new Date(day).setUTCHours(14, 30, 0, 0)),
+        },
+      ];
+    });
+
+    const reasons = diagnoseNoOptions(REQUEST, snapshot({ booked }), LABELS);
+    expect(reasons[0]).toMatch(/already on the schedule|marked unavailable/i);
   });
 });

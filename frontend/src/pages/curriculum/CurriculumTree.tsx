@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { CurriculumLevelDto, CurriculumSubjectDto, HeadingDto } from '@vig/shared';
-import { formatShortDate } from '@vig/shared';
+import { formatShortDate, SCHOOL_TIMEZONE } from '@vig/shared';
 import { errorMessage, get, patch, post } from '@/lib/api';
 import { PageHeader } from '@/components/ui/Layout';
 import { Button } from '@/components/ui/Button';
@@ -374,7 +374,8 @@ function Stamp({ entry }: { entry: { addedByName: string | null; addedAt: string
   return (
     <span className="mt-0.5 block text-[11px] text-ink-3">
       {entry.addedByName ? `Added by ${entry.addedByName}` : 'Added'} ·{' '}
-      {formatShortDate(new Date(entry.addedAt))}
+      {/* createdAt — a real instant, so it renders in the school's timezone. */}
+      {formatShortDate(new Date(entry.addedAt), SCHOOL_TIMEZONE)}
     </span>
   );
 }

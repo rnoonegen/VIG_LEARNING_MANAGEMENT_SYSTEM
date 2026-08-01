@@ -93,8 +93,26 @@ export function endOfWeek(d: Date, weekStartDay = 1): Date {
   return addDays(startOfWeek(d, weekStartDay), 6);
 }
 
+/**
+ * Two kinds of Date flow through this app, and they render differently:
+ *
+ *   Schedule values — class times, recording deadlines, `@db.Date` columns.
+ *     School-local wall clock written into UTC fields (combineDateAndTime uses
+ *     setUTCHours), so the stored value already *is* the school's clock.
+ *     Render in UTC; converting again applies the offset twice.
+ *
+ *   Real instants — savedAt, createdAt, confirmedAt, "now".
+ *     Genuine points in time. Render in SCHOOL_TIMEZONE, passed explicitly.
+ *
+ * The default is UTC because the first kind is the overwhelming majority, and
+ * because formatInstantTime defaults the same way — a row reading
+ * `${formatShortDate(x)} · ${formatInstantTime(x)}` must not shift its date and
+ * its time into different frames.
+ */
+export const SCHOOL_TIMEZONE = 'Asia/Kolkata';
+
 /** "Thursday, 23 July" — the greeting date format used across the boards. */
-export function formatLongDate(d: Date, timeZone = 'Asia/Kolkata'): string {
+export function formatLongDate(d: Date, timeZone = 'UTC'): string {
   return new Intl.DateTimeFormat('en-GB', {
     weekday: 'long',
     day: 'numeric',
@@ -104,7 +122,7 @@ export function formatLongDate(d: Date, timeZone = 'Asia/Kolkata'): string {
 }
 
 /** "23 Jul 2026" — compact form for metadata rows. */
-export function formatShortDate(d: Date, timeZone = 'Asia/Kolkata'): string {
+export function formatShortDate(d: Date, timeZone = 'UTC'): string {
   return new Intl.DateTimeFormat('en-GB', {
     day: 'numeric',
     month: 'short',
@@ -113,8 +131,16 @@ export function formatShortDate(d: Date, timeZone = 'Asia/Kolkata'): string {
   }).format(d);
 }
 
-/** Renders an absolute instant as a clock time in the school timezone. */
-export function formatInstantTime(d: Date, timeZone = 'Asia/Kolkata'): string {
+/**
+ * Renders a scheduled instant as a clock time.
+ *
+ * Defaults to UTC, which looks wrong and is not: class times are school-local
+ * wall clock written into UTC fields (combineDateAndTime uses setUTCHours), so
+ * the stored value *is* the school's clock. Converting it into the school's
+ * timezone would apply the offset a second time — a 9:00 AM class rendered as
+ * 2:30 PM. Every caller passes a scheduled value, never a real instant.
+ */
+export function formatInstantTime(d: Date, timeZone = 'UTC'): string {
   return new Intl.DateTimeFormat('en-US', {
     hour: 'numeric',
     minute: '2-digit',

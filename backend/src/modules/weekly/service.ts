@@ -77,9 +77,21 @@ export async function generate(studentId: string, weekStartKey: string) {
     }),
   ]);
 
+  /**
+   * One entry per skill, holding the week's final word on it.
+   *
+   * `learning` is the append-only history: a skill corrected mid-week, or taken
+   * again in a second class, has several rows. A parent should read what a skill
+   * ended the week as, once — not "Topic sentences and Topic sentences", and not
+   * a row saying covered next to a row saying not yet.
+   */
+  const latestPerSkill = new Map<string, (typeof learning)[number]>();
+  for (const l of learning) latestPerSkill.set(l.skillId, l); // ordered oldest → newest
+  const finalLearning = [...latestPerSkill.values()];
+
   // --- Week at a glance, assembled from what was actually approved ----------
   const subjectsWorkedOn = [...new Set(records.map((r) => r.occurrence.class.subject.name))];
-  const covered = learning.filter((l) => l.newStatus === 'MASTERED').map((l) => l.skill.name);
+  const covered = finalLearning.filter((l) => l.newStatus === 'MASTERED').map((l) => l.skill.name);
   const growthAreas = [...new Set(development.map((d) => d.area.name))];
 
   const sentences: string[] = [];
@@ -103,7 +115,7 @@ export async function generate(studentId: string, weekStartKey: string) {
   const items: Array<Omit<WeeklyUpdateItemDto, 'id'>> = [];
   let order = 0;
 
-  for (const l of learning) {
+  for (const l of finalLearning) {
     items.push({
       itemType: 'LEARNING',
       refId: l.id,

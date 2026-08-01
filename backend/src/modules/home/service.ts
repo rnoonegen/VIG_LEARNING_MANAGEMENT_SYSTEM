@@ -4,6 +4,7 @@ import { formatLongDate } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { env } from '../../env.js';
 import { toOccurrenceDto } from '../scheduling/service.js';
+import { findMissedRecords } from '../classrecord/service.js';
 import { computeAttention } from './attention.js';
 
 /**
@@ -107,7 +108,7 @@ export async function getAdminHome(greetingName: string): Promise<AdminHomeDto> 
     today: formatLongDate(new Date(), env.SCHOOL_TIMEZONE),
     setupComplete: setupSteps.every((s) => s.complete),
     setupSteps,
-    todaysClasses: todays.map(toOccurrenceDto),
+    todaysClasses: todays.map((o) => toOccurrenceDto(o)),
     attention,
   };
 }
@@ -122,7 +123,7 @@ export async function getTeacherHome(teacherId: string, greetingName: string): P
   const weekAhead = new Date(now);
   weekAhead.setUTCDate(weekAhead.getUTCDate() + 7);
 
-  const [todays, due, upcoming] = await Promise.all([
+  const [todays, unwritten, upcoming, missed] = await Promise.all([
     prisma.classOccurrence.findMany({
       where: { teacherId, scheduledStart: { gte: start, lt: end }, status: { not: 'CANCELLED' } },
       include: occurrenceInclude,
@@ -137,7 +138,7 @@ export async function getTeacherHome(teacherId: string, greetingName: string): P
       },
       include: occurrenceInclude,
       orderBy: { scheduledStart: 'desc' },
-      take: 10,
+      take: 20,
     }),
     prisma.classOccurrence.findMany({
       where: { teacherId, scheduledStart: { gte: end, lte: weekAhead }, status: { not: 'CANCELLED' } },
@@ -145,13 +146,25 @@ export async function getTeacherHome(teacherId: string, greetingName: string): P
       orderBy: { scheduledStart: 'asc' },
       take: 5,
     }),
+    findMissedRecords({ teacherId }, now),
   ]);
+
+  // "Due" has to mean actionable. A class past its deadline belongs under Missed,
+  // where the count is the point, not on a work queue the teacher cannot clear.
+  const due = unwritten
+    .map((o) => toOccurrenceDto(o, now))
+    .filter((o) => o.recordState === 'OPEN')
+    .slice(0, 10);
 
   return {
     greetingName,
     today: formatLongDate(now, env.SCHOOL_TIMEZONE),
-    todaysClasses: todays.map(toOccurrenceDto),
-    recordsDue: due.map(toOccurrenceDto),
-    upcoming: upcoming.map(toOccurrenceDto),
+    todaysClasses: todays.map((o) => toOccurrenceDto(o, now)),
+    recordsDue: due,
+    upcoming: upcoming.map((o) => toOccurrenceDto(o, now)),
+    missedRecords: {
+      total: missed.length,
+      recent: missed.slice(0, 5).map((o) => toOccurrenceDto(o, now)),
+    },
   };
 }

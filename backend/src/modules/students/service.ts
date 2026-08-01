@@ -6,6 +6,8 @@ import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { createUser } from '../../auth/service.js';
 import { signAvatar } from '../../lib/storage.js';
+import { readableStudentIds } from '../../auth/guards.js';
+import type { AuthContext } from '../../types/express.js';
 
 /**
  * Adding a student means making them teachable and schedulable, not just naming
@@ -18,6 +20,8 @@ const studentInclude = {
   subjectLevels: {
     where: { isCurrent: true },
     include: { subject: true, level: true },
+    // Curriculum order, so a subject does not move between reads.
+    orderBy: { subject: { displayOrder: 'asc' } },
   },
   availability: { orderBy: [{ weekday: 'asc' }, { startTime: 'asc' }] },
   parents: { include: { parent: { include: { user: true } } } },
@@ -36,7 +40,48 @@ function mapSubjectLevels(student: StudentWithRelations): StudentSubjectLevelDto
   }));
 }
 
-export async function listStudents(scope: string[] | 'ALL'): Promise<StudentSummaryDto[]> {
+/**
+ * What a teacher covers, for annotating their own student list: the subjects and
+ * level ranges they hold, and the children already on their schedule.
+ */
+async function teachingContext(teacherId: string) {
+  const [capabilities, scheduled] = await Promise.all([
+    prisma.teacherCapability.findMany({
+      where: { teacherId },
+      select: { subjectId: true, minLevelOrder: true, maxLevelOrder: true },
+    }),
+    prisma.classStudent.findMany({
+      where: { class: { teacherId } },
+      select: { studentId: true },
+      distinct: ['studentId'],
+    }),
+  ]);
+
+  const scheduledIds = new Set(scheduled.map((s) => s.studentId));
+
+  return {
+    /** The subjects out of a child's assignments that fall to this teacher. */
+    taught: (subjectLevels: StudentSubjectLevelDto[]) =>
+      subjectLevels.filter((sl) =>
+        capabilities.some(
+          (c) =>
+            c.subjectId === sl.subjectId &&
+            sl.levelOrder >= c.minLevelOrder &&
+            sl.levelOrder <= c.maxLevelOrder,
+        ),
+      ),
+    hasScheduledClass: (studentId: string) => scheduledIds.has(studentId),
+  };
+}
+
+/**
+ * The list, scoped to the caller. A teacher's rows additionally carry which
+ * subjects are theirs, so their Students page reads as "my students, for what I
+ * teach them" rather than an undifferentiated roster.
+ */
+export async function listStudents(ctx: AuthContext): Promise<StudentSummaryDto[]> {
+  const scope = await readableStudentIds(ctx);
+
   const students = await prisma.student.findMany({
     where: {
       status: { not: 'ARCHIVED' },
@@ -46,15 +91,27 @@ export async function listStudents(scope: string[] | 'ALL'): Promise<StudentSumm
     orderBy: { fullName: 'asc' },
   });
 
+  const teaching =
+    ctx.role === 'TEACHER' && ctx.teacherId ? await teachingContext(ctx.teacherId) : null;
+
   return Promise.all(
-    students.map(async (s) => ({
-      id: s.id,
-      fullName: s.fullName,
-      gradeLabel: s.gradeLabel,
-      status: s.status,
-      avatarUrl: await signAvatar(s.avatarPath),
-      subjectLevels: mapSubjectLevels(s),
-    })),
+    students.map(async (s) => {
+      const subjectLevels = mapSubjectLevels(s);
+      return {
+        id: s.id,
+        fullName: s.fullName,
+        gradeLabel: s.gradeLabel,
+        status: s.status,
+        avatarUrl: await signAvatar(s.avatarPath),
+        subjectLevels,
+        ...(teaching
+          ? {
+              taughtSubjectLevels: teaching.taught(subjectLevels),
+              hasScheduledClass: teaching.hasScheduledClass(s.id),
+            }
+          : {}),
+      };
+    }),
   );
 }
 
@@ -82,6 +139,7 @@ export async function getStudent(studentId: string): Promise<StudentDto> {
       parentId: p.parentId,
       userId: p.parent.userId,
       fullName: p.parent.user.fullName,
+      username: p.parent.user.username,
       relationship: p.relationship,
     })),
     setupComplete: student.subjectLevels.length > 0 && student.availability.length > 0,
@@ -179,8 +237,15 @@ export async function createStudent(input: CreateStudentInput, actorId: string) 
 export async function updateStudent(
   studentId: string,
   data: { fullName?: string; dateOfBirth?: string | null; gradeLabel?: string | null; notes?: string | null },
+  actorId: string,
 ) {
-  await prisma.student.update({
+  const before = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { fullName: true, dateOfBirth: true, gradeLabel: true, notes: true },
+  });
+  if (!before) throw notFound('Student');
+
+  const after = await prisma.student.update({
     where: { id: studentId },
     data: {
       ...(data.fullName !== undefined ? { fullName: data.fullName } : {}),
@@ -190,7 +255,18 @@ export async function updateStudent(
         ? { dateOfBirth: data.dateOfBirth ? new Date(`${data.dateOfBirth}T00:00:00.000Z`) : null }
         : {}),
     },
+    select: { fullName: true, gradeLabel: true },
   });
+
+  await audit({
+    actorId,
+    action: 'STUDENT_UPDATED',
+    entity: 'Student',
+    entityId: studentId,
+    before: { fullName: before.fullName, gradeLabel: before.gradeLabel },
+    after,
+  });
+
   return getStudent(studentId);
 }
 
@@ -205,6 +281,31 @@ export async function putSubjectLevels(
   subjectLevels: Array<{ subjectId: string; levelId: string }>,
   actorId: string,
 ) {
+  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { id: true } });
+  if (!student) throw notFound('Student');
+
+  // A level belongs to exactly one subject. A mismatched pair would produce a
+  // learning map for a level the subject does not contain, so it is refused here
+  // rather than discovered later.
+  if (subjectLevels.length) {
+    const levels = await prisma.level.findMany({
+      where: { id: { in: subjectLevels.map((sl) => sl.levelId) } },
+      select: { id: true, subjectId: true },
+    });
+    const subjectByLevel = new Map(levels.map((l) => [l.id, l.subjectId]));
+
+    for (const sl of subjectLevels) {
+      const owner = subjectByLevel.get(sl.levelId);
+      if (!owner) throw badRequest('That level no longer exists. Reload and try again.');
+      if (owner !== sl.subjectId) throw badRequest('That level does not belong to the chosen subject.');
+    }
+
+    const distinctSubjects = new Set(subjectLevels.map((sl) => sl.subjectId));
+    if (distinctSubjects.size !== subjectLevels.length) {
+      throw badRequest('A student can only be on one level per subject.');
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     const existing = await tx.studentSubjectLevel.findMany({ where: { studentId, isCurrent: true } });
 

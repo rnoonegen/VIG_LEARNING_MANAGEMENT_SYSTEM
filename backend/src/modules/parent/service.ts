@@ -1,4 +1,5 @@
 import type { ParentChildDto, ParentHomeDto, SkillStatus } from '@vig/shared';
+import { COVERED_STATUS } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { forbidden, notFound } from '../../lib/errors.js';
 import { signAvatar } from '../../lib/storage.js';
@@ -14,7 +15,17 @@ import { getStudentDevelopment } from '../development/service.js';
 export async function listChildren(parentId: string): Promise<ParentChildDto[]> {
   const links = await prisma.parentStudent.findMany({
     where: { parentId, student: { status: { not: 'ARCHIVED' } } },
-    include: { student: true },
+    include: {
+      student: {
+        include: {
+          subjectLevels: {
+            where: { isCurrent: true },
+            include: { subject: true, level: true },
+            orderBy: { subject: { displayOrder: 'asc' } },
+          },
+        },
+      },
+    },
     orderBy: { student: { fullName: 'asc' } },
   });
 
@@ -25,6 +36,14 @@ export async function listChildren(parentId: string): Promise<ParentChildDto[]> 
       gradeLabel: l.student.gradeLabel,
       relationship: l.relationship,
       avatarUrl: await signAvatar(l.student.avatarPath),
+      subjectLevels: l.student.subjectLevels.map((sl) => ({
+        subjectId: sl.subjectId,
+        subjectName: sl.subject.name,
+        colorToken: sl.subject.colorToken,
+        levelId: sl.levelId,
+        levelName: sl.level.name,
+        levelOrder: sl.level.displayOrder,
+      })),
     })),
   );
 }
@@ -54,8 +73,12 @@ export async function getHome(parentId: string, requestedChildId?: string): Prom
       where: { studentId: child.id, status: 'PUBLISHED' },
       orderBy: { weekStart: 'desc' },
     }),
+    // What a teacher actually records is coverage: taken through, or not yet
+    // (COVERED_STATUS). This once filtered on LEARNING/NEEDS_SUPPORT, which the
+    // two-state coverage flow never writes — so the card was always empty however
+    // much work the teacher had ticked off.
     prisma.studentSkillProgress.findMany({
-      where: { studentId: child.id, status: { in: ['LEARNING', 'NEEDS_SUPPORT'] } },
+      where: { studentId: child.id, status: COVERED_STATUS },
       orderBy: { updatedAt: 'desc' },
       take: 4,
       include: {

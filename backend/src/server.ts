@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { env, supabaseConfigured } from './env.js';
 import { prisma } from './prisma.js';
 import { extendHorizon } from './modules/scheduling/service.js';
+import { sweepMissedRecords } from './modules/classrecord/service.js';
 
 const app = createApp();
 
@@ -22,6 +23,7 @@ const server = app.listen(env.PORT, () => {
  * process, which is the right trade at this scale.
  */
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 extendHorizon()
   .then((count) => count && console.log(`[api] materialised ${count} class occurrences`))
@@ -31,9 +33,24 @@ const horizonTimer = setInterval(() => {
   extendHorizon().catch((err) => console.error('[api] horizon extension failed:', err));
 }, DAY_MS);
 
+/**
+ * A recording deadline passes at a wall-clock hour, so this runs hourly rather
+ * than daily: a once-a-day sweep tied to boot time would report a missed record
+ * anywhere up to 24 hours late. The sweep is idempotent — it will not announce
+ * the same teacher and day twice.
+ */
+const sweep = () =>
+  sweepMissedRecords()
+    .then((count) => count && console.log(`[api] reported ${count} missed class record group(s)`))
+    .catch((err) => console.error('[api] missed class-record sweep failed:', err));
+
+void sweep();
+const missedRecordTimer = setInterval(() => void sweep(), HOUR_MS);
+
 async function shutdown(signal: string) {
   console.log(`[api] ${signal} received, shutting down`);
   clearInterval(horizonTimer);
+  clearInterval(missedRecordTimer);
   server.close();
   await prisma.$disconnect();
   process.exit(0);

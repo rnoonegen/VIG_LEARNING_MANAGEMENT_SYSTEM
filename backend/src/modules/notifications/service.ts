@@ -21,6 +21,9 @@ const ALLOWED_BY_ROLE: Record<Role, NotificationType[]> = {
     'INCOMPLETE_SETUP',
     'SCHEDULE_CHANGED',
     'PASSWORD_RESET_REQUEST',
+    // A teacher letting a recording deadline pass is an operational issue only an
+    // admin can act on: the class went undocumented and cannot be recovered.
+    'CLASS_RECORD_DUE',
   ],
 };
 

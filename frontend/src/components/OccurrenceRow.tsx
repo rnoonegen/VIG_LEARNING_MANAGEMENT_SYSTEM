@@ -31,10 +31,14 @@ export function OccurrenceRow({ occurrence, to }: { occurrence: OccurrenceDto; t
         </p>
       </div>
 
-      {occurrence.hasClassRecord ? (
-        <Pill token="green">Complete</Pill>
-      ) : occurrence.status === 'CANCELLED' ? (
+      {/* A class is recorded once, before the next morning — so "not recorded"
+          means two different things depending on whether time has run out. */}
+      {occurrence.status === 'CANCELLED' ? (
         <Pill token="muted">Cancelled</Pill>
+      ) : occurrence.recordState === 'SAVED' ? (
+        <Pill token="green">Complete</Pill>
+      ) : occurrence.recordState === 'CLOSED' ? (
+        <Pill token="orange">Missed</Pill>
       ) : null}
 
       {to ? <ChevronRight size={16} className="shrink-0 text-ink-3" /> : null}

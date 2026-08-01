@@ -70,8 +70,12 @@ export interface RankedSlot extends SlotOptionDto {
 
 /** Candidate start times are probed on the half hour. */
 const STEP_MINUTES = 30;
-/** How many weeks of the future to check for conflicts before offering a pattern. */
-const CONFLICT_HORIZON_WEEKS = 4;
+/**
+ * How many weeks of the future to check for conflicts before offering a pattern.
+ * Exported so the snapshot loader fetches exactly this span rather than every
+ * materialised occurrence — the two must not drift apart.
+ */
+export const CONFLICT_HORIZON_WEEKS = 4;
 const MAX_OPTIONS = 5;
 
 // --- Small helpers ----------------------------------------------------------
@@ -129,6 +133,74 @@ export function combineDateAndTime(date: Date, hhmm: string): Date {
   return out;
 }
 
+// --- Shared stages ----------------------------------------------------------
+
+/** Whether a teacher is assigned this subject at this level (F5, BR-05). */
+function canTeach(teacher: TeacherSnapshot, subjectId: string, levelOrder: number): boolean {
+  return teacher.capabilities.some(
+    (c) => c.subjectId === subjectId && levelOrder >= c.minLevelOrder && levelOrder <= c.maxLevelOrder,
+  );
+}
+
+/**
+ * Start times that fit the whole class, per weekday, once the teacher's and
+ * every student's weekly availability are intersected.
+ *
+ * Shared by the search and its diagnosis so the two cannot disagree about what
+ * "they are both free" means.
+ */
+function sharedStartTimes(
+  teacher: TeacherSnapshot,
+  students: StudentSnapshot[],
+  durationMinutes: number,
+): Map<number, Set<string>> {
+  const startTimesByWeekday = new Map<number, Set<string>>();
+
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    const teacherWindows: TimeRange[] = teacher.availability
+      .filter((a) => a.weekday === weekday)
+      .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
+    if (teacherWindows.length === 0) continue;
+
+    let shared = teacherWindows;
+    for (const student of students) {
+      const studentWindows: TimeRange[] = student.availability
+        .filter((a) => a.weekday === weekday)
+        .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
+      if (studentWindows.length === 0) {
+        shared = [];
+        break;
+      }
+      shared = intersectRanges(shared, studentWindows);
+    }
+    if (shared.length === 0) continue;
+
+    // Slide the class duration through each shared window.
+    const starts = new Set<string>();
+    for (const window of shared) {
+      const first = toMinutes(window.startTime);
+      const last = toMinutes(window.endTime) - durationMinutes;
+      const aligned = Math.ceil(first / STEP_MINUTES) * STEP_MINUTES;
+      for (let t = aligned; t <= last; t += STEP_MINUTES) starts.add(toHHMM(t));
+    }
+    if (starts.size) startTimesByWeekday.set(weekday, starts);
+  }
+
+  return startTimesByWeekday;
+}
+
+/** A recurring pattern needs the same start time on every chosen day. */
+function daysByStartTime(startTimesByWeekday: Map<number, Set<string>>): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const [weekday, starts] of startTimesByWeekday) {
+    for (const start of starts) {
+      if (!out.has(start)) out.set(start, []);
+      out.get(start)!.push(weekday);
+    }
+  }
+  return out;
+}
+
 // --- The engine -------------------------------------------------------------
 
 export function findValidSlots(request: SlotRequest, snapshot: SchedulingSnapshot): RankedSlot[] {
@@ -139,12 +211,7 @@ export function findValidSlots(request: SlotRequest, snapshot: SchedulingSnapsho
   //     is not a candidate, however convenient the slot (F5).
   const candidates = snapshot.teachers.filter((t) => {
     if (request.teacherId && t.teacherId !== request.teacherId) return false;
-    return t.capabilities.some(
-      (c) =>
-        c.subjectId === request.subjectId &&
-        snapshot.levelOrder >= c.minLevelOrder &&
-        snapshot.levelOrder <= c.maxLevelOrder,
-    );
+    return canTeach(t, request.subjectId, snapshot.levelOrder);
   });
 
   const students = snapshot.students.filter((s) => request.studentIds.includes(s.studentId));
@@ -153,51 +220,11 @@ export function findValidSlots(request: SlotRequest, snapshot: SchedulingSnapsho
   const results: RankedSlot[] = [];
 
   for (const teacher of candidates) {
-    // 2 — Availability intersection, per weekday, across the teacher and every
-    //     student in the class.
-    const startTimesByWeekday = new Map<number, Set<string>>();
+    // 2/3 — Availability intersection, then the duration slid through it.
+    const startTimesByWeekday = sharedStartTimes(teacher, students, request.durationMinutes);
 
-    for (let weekday = 0; weekday < 7; weekday += 1) {
-      const teacherWindows: TimeRange[] = teacher.availability
-        .filter((a) => a.weekday === weekday)
-        .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
-      if (teacherWindows.length === 0) continue;
-
-      let shared = teacherWindows;
-      for (const student of students) {
-        const studentWindows: TimeRange[] = student.availability
-          .filter((a) => a.weekday === weekday)
-          .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
-        if (studentWindows.length === 0) {
-          shared = [];
-          break;
-        }
-        shared = intersectRanges(shared, studentWindows);
-      }
-      if (shared.length === 0) continue;
-
-      // 3 — Slide the class duration through each shared window.
-      const starts = new Set<string>();
-      for (const window of shared) {
-        const first = toMinutes(window.startTime);
-        const last = toMinutes(window.endTime) - request.durationMinutes;
-        const aligned = Math.ceil(first / STEP_MINUTES) * STEP_MINUTES;
-        for (let t = aligned; t <= last; t += STEP_MINUTES) starts.add(toHHMM(t));
-      }
-      if (starts.size) startTimesByWeekday.set(weekday, starts);
-    }
-
-    // 4 — A recurring pattern needs the same start time on every chosen day,
-    //     which is what the boards show ("Mon & Wed · 8:00 – 9:00").
-    const daysByStartTime = new Map<string, number[]>();
-    for (const [weekday, starts] of startTimesByWeekday) {
-      for (const start of starts) {
-        if (!daysByStartTime.has(start)) daysByStartTime.set(start, []);
-        daysByStartTime.get(start)!.push(weekday);
-      }
-    }
-
-    for (const [startTime, days] of daysByStartTime) {
+    // 4 — Group the weekdays that share a start time ("Mon & Wed · 8:00 – 9:00").
+    for (const [startTime, days] of daysByStartTime(startTimesByWeekday)) {
       if (days.length < request.timesPerWeek) continue;
       const endTime = toHHMM(toMinutes(startTime) + request.durationMinutes);
 
@@ -270,6 +297,117 @@ export function findValidSlots(request: SlotRequest, snapshot: SchedulingSnapsho
 
   if (deduped[0]) deduped[0].isBestMatch = true;
   return deduped;
+}
+
+/**
+ * Why the search came back empty.
+ *
+ * "No valid times found" is a true statement and a useless one: the admin cannot
+ * tell whether the teacher lacks the subject, nobody has set availability, or
+ * everything is simply booked — and those need completely different fixes. This
+ * walks the same stages in the same order and reports the first one that ruled
+ * everything out, in the school's own vocabulary.
+ *
+ * Only called when findValidSlots returns nothing, so it is free to be thorough.
+ */
+export function diagnoseNoOptions(
+  request: SlotRequest,
+  snapshot: SchedulingSnapshot,
+  labels: { subjectName: string; levelName: string },
+): string[] {
+  const students = snapshot.students.filter((s) => request.studentIds.includes(s.studentId));
+  if (students.length !== request.studentIds.length) {
+    return ['One of the selected students could not be loaded. Reload and try again.'];
+  }
+
+  const list = (names: string[]) =>
+    names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]!}`;
+
+  // 1 — Capability. The stage that stops a search before availability matters.
+  const capable = snapshot.teachers.filter((t) => canTeach(t, request.subjectId, snapshot.levelOrder));
+  const requested = request.teacherId
+    ? snapshot.teachers.find((t) => t.teacherId === request.teacherId)
+    : null;
+
+  if (request.teacherId && !requested) {
+    return ['That teacher is no longer active. Choose another, or leave the teacher blank.'];
+  }
+
+  if (requested && !capable.some((t) => t.teacherId === requested.teacherId)) {
+    const reasons = [
+      `${requested.fullName} is not assigned to teach ${labels.subjectName} at ${labels.levelName}. ` +
+        `Add it under Teachers → ${requested.fullName} → Teaching.`,
+    ];
+    reasons.push(
+      capable.length > 0
+        ? `${list(capable.map((t) => t.fullName))} can teach it — or leave the teacher blank to search everyone.`
+        : `No teacher is assigned to ${labels.subjectName} at ${labels.levelName} yet.`,
+    );
+    return reasons;
+  }
+
+  if (capable.length === 0) {
+    return [
+      `No teacher is assigned to teach ${labels.subjectName} at ${labels.levelName}. ` +
+        'Add the subject and level range to a teacher under Teachers → Teaching.',
+    ];
+  }
+
+  const candidates = requested ? [requested] : capable;
+
+  // 2 — Availability, named per person so the admin knows whose to set.
+  const reasons: string[] = [];
+  const studentsUnset = students.filter((s) => s.availability.length === 0);
+  if (studentsUnset.length) {
+    reasons.push(
+      `${list(studentsUnset.map((s) => s.fullName))} ${
+        studentsUnset.length === 1 ? 'has' : 'have'
+      } no weekly availability set.`,
+    );
+  }
+  const teachersUnset = candidates.filter((t) => t.availability.length === 0);
+  if (teachersUnset.length === candidates.length) {
+    reasons.push(`${list(candidates.map((t) => t.fullName))} has no weekly availability set.`);
+  }
+  if (reasons.length) return reasons;
+
+  // 3 — Overlap, and whether it covers enough days for the requested frequency.
+  let mostDaysAtOneTime = 0;
+  for (const teacher of candidates) {
+    for (const [, days] of daysByStartTime(sharedStartTimes(teacher, students, request.durationMinutes))) {
+      mostDaysAtOneTime = Math.max(mostDaysAtOneTime, days.length);
+    }
+  }
+
+  if (mostDaysAtOneTime === 0) {
+    return [
+      `There is no ${request.durationMinutes}-minute window when ${list(
+        candidates.map((t) => t.fullName),
+      )} and ${list(students.map((s) => s.fullName))} are both free on the same day.`,
+    ];
+  }
+
+  if (mostDaysAtOneTime < request.timesPerWeek) {
+    return [
+      `They are free at the same time on only ${mostDaysAtOneTime} ${
+        mostDaysAtOneTime === 1 ? 'day' : 'days'
+      } a week, but you asked for ${request.timesPerWeek} times per week. ` +
+        `Try ${mostDaysAtOneTime} times per week, or widen availability.`,
+    ];
+  }
+
+  // 4 — Dates. An end date before the pattern's first occurrence produces none.
+  const startDate = new Date(`${request.startDate}T00:00:00.000Z`);
+  const endDate = request.endDate ? new Date(`${request.endDate}T00:00:00.000Z`) : undefined;
+  if (endDate && endDate < startDate) {
+    return ['The end date is before the start date.'];
+  }
+
+  // 5 — Everything else was ruled out on the concrete dates.
+  return [
+    'Every time that would otherwise work is taken by a class already on the schedule, or falls on a date ' +
+      'marked unavailable. Try a later start date, a different frequency, or cancel the clashing class.',
+  ];
 }
 
 /**

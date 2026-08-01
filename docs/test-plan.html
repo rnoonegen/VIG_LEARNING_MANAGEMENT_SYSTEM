@@ -1,0 +1,308 @@
+<meta charset="utf-8" />
+<title>Valmiki LMS — Manual Test Plan</title>
+<style>
+  @page { size: A4; margin: 14mm 12mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 9.5pt; line-height: 1.45; color: #1c1b2e; margin: 0;
+  }
+  h1 { font-size: 21pt; margin: 0 0 2mm; color: #3b1e9e; }
+  h2 {
+    font-size: 12.5pt; margin: 7mm 0 2.5mm; padding-bottom: 1.5mm;
+    border-bottom: 2px solid #3b1e9e; color: #3b1e9e; page-break-after: avoid;
+  }
+  h3 { font-size: 10.5pt; margin: 4.5mm 0 1.5mm; color: #2a2a44; page-break-after: avoid; }
+  p { margin: 0 0 2mm; }
+  .sub { color: #55536b; font-size: 9pt; margin-bottom: 4mm; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; page-break-inside: auto; }
+  tr { page-break-inside: avoid; }
+  th, td { border: 0.5pt solid #cfcde0; padding: 1.6mm 2mm; text-align: left; vertical-align: top; }
+  th { background: #efecfb; font-weight: 600; font-size: 8.5pt; }
+  td { font-size: 8.8pt; }
+  .id { width: 15mm; font-weight: 600; color: #3b1e9e; white-space: nowrap; }
+  .res { width: 17mm; text-align: center; }
+  .notes { width: 30mm; }
+  code { background: #f2f1f9; padding: 0.3mm 1mm; border-radius: 2px; font-size: 8.3pt; }
+  .box { border: 0.5pt solid #cfcde0; background: #faf9ff; padding: 2.5mm 3mm; margin-bottom: 3mm; border-radius: 2mm; }
+  .warn { border-color: #e0b34a; background: #fdf8ec; }
+  .note { border-color: #7a6fd0; background: #f4f2fd; }
+  ul, ol { margin: 0 0 2mm; padding-left: 5mm; }
+  li { margin-bottom: 0.8mm; }
+  .pagebreak { page-break-before: always; }
+  .foot { margin-top: 6mm; padding-top: 2mm; border-top: 0.5pt solid #cfcde0; color: #77758c; font-size: 8pt; }
+</style>
+
+<h1>Valmiki LMS — Manual Test Plan</h1>
+<p class="sub">
+  Walk through every screen and flow, role by role. Tick <strong>Pass</strong> or <strong>Fail</strong> for
+  each case. If something fails, write what you saw in Notes — the “Expected result” column is what it
+  should have done, so the two together are enough to act on.
+</p>
+
+<h2>1 · Before you start</h2>
+
+<h3>Getting the app running</h3>
+<table>
+  <tr><th style="width:38mm">Step</th><th>Command / action</th></tr>
+  <tr><td>Load the demo data</td><td><code>npm run db:seed</code> — safe to re-run at any time</td></tr>
+  <tr><td>Start the app</td><td><code>npm run dev</code></td></tr>
+  <tr><td>Open it</td><td><code>http://localhost:3000</code></td></tr>
+</table>
+
+<div class="box note">
+  <strong>Re-seeding resets the testable states.</strong> Recording a class uses up the one class that is
+  waiting to be recorded. Run <code>npm run db:seed</code> again to put it back — it only recreates what is
+  missing, so nothing is duplicated and nothing you added is deleted.
+</div>
+
+<h3>Sign-in details — password for all accounts: <code>Valmiki@2026</code></h3>
+<table>
+  <tr><th style="width:22mm">Username</th><th style="width:24mm">Role</th><th>What this account is for</th></tr>
+  <tr><td><code>anjali</code></td><td>Admin</td><td>Everything — the school office view</td></tr>
+  <tr><td><code>priya</code></td><td>Teacher</td><td>Maths &amp; Science. Has classes and 3 missed class records</td></tr>
+  <tr><td><code>meera</code></td><td>Teacher</td><td>English. Has 1 record waiting to be written and 1 missed</td></tr>
+  <tr><td><code>rohit</code></td><td>Teacher</td><td>Telugu. Has students but <em>no classes scheduled yet</em></td></tr>
+  <tr><td><code>ananya</code></td><td>Parent</td><td>One child (Aarav Sharma)</td></tr>
+  <tr><td><code>vikram</code></td><td>Parent</td><td><em>Two</em> children (Diya Rao and Ishaan Rao)</td></tr>
+</table>
+
+<h3>The students in the demo data</h3>
+<table>
+  <tr><th style="width:30mm">Student</th><th style="width:52mm">Subjects</th><th>Deliberately set up so you can test…</th></tr>
+  <tr><td>Aarav Sharma</td><td>Mathematics L3, English L2, Science L2</td><td>A fully set-up child with a parent</td></tr>
+  <tr><td>Diya Rao</td><td>Mathematics L3, English L2, Telugu L1</td><td>Telugu has <em>no teacher assigned</em></td></tr>
+  <tr><td>Ishaan Rao</td><td>Telugu L1</td><td>A sibling — same parent account as Diya</td></tr>
+  <tr><td>Kabir Singh</td><td>Mathematics L3, Science L2</td><td>A child with <em>no parent account</em> linked</td></tr>
+</table>
+
+<h2>2 · Sign in and access rules</h2>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">AUTH-01</td><td>Sign in as <code>anjali</code> with the correct password</td><td>Lands on the Admin home page</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">AUTH-02</td><td>Sign in with a wrong password</td><td>Refused. The message does not reveal whether the username exists</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">AUTH-03</td><td>Sign in with a username that does not exist</td><td>Exactly the same message as AUTH-02</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">AUTH-04</td><td>While signed in as <code>priya</code>, type <code>/admin</code> in the address bar</td><td>Sent back to the teacher area. No admin screen appears</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">AUTH-05</td><td>While signed in as <code>ananya</code>, type <code>/admin/students</code> in the address bar</td><td>Sent back to the parent area</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">AUTH-06</td><td>Sign out from the bottom-left of the sidebar</td><td>Returns to the sign-in page. Going back in the browser does not restore the session</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">AUTH-07</td><td>Use “Forgot password” with any username</td><td>Same confirmation either way. An admin sees a reset request on their home page</td><td class="res"></td><td></td></tr>
+</table>
+
+<h2 class="pagebreak">3 · Admin — sign in as <code>anjali</code></h2>
+
+<h3>3.1 Home and Needs Attention</h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">ADM-01</td><td>Look at the Needs Attention list on Home</td><td>Issues are grouped by cause, most serious first — red before orange before blue</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-02</td><td>Find the entry about Priya Sharma</td><td>Says she <em>missed the deadline</em> on some class records, in red. Click “View 3 affected” to expand them</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-03</td><td>Find the entry about Meera Reddy</td><td>Two separate entries: one <em>missed</em> (red) and one <em>outstanding</em> (orange). These mean different things — outstanding can still be written</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-04</td><td>Read the “setup is incomplete” entries</td><td>Each one names the exact gap, e.g. “Still needed: a class for Telugu.” Kabir Singh should name two subjects</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-05</td><td>Click “Review student” on one of them</td><td>Opens that child’s profile</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-06</td><td>Check the “Today” list at the bottom</td><td>Class times read as normal school hours (e.g. 9:00 AM), not shifted by several hours</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3>3.2 Adding a student</h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">ADM-07</td><td>Students → Add Student. Try to continue past step 1 with an empty name</td><td>The Next button stays disabled</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-08</td><td>Enter a name, date of birth and grade, then continue to Subjects</td><td>Step 2 opens</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-09</td><td>Add two subjects and pick a level for each</td><td>A subject already chosen is not offered again in the second row</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-10</td><td>Add a subject but leave its level blank</td><td>Cannot continue until a level is chosen</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-11</td><td>Set weekly availability, then continue</td><td>At least one day must be switched on</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-12</td><td>Fill in a parent name and username, continue to Review</td><td>The review lists the name, DOB, grade, <em>each subject with its level name</em>, availability and the parent</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-13</td><td>Click Create Student</td><td>A temporary password is shown <em>once</em>, with a copy button</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-14</td><td>Close that box and look at the Students list</td><td>The new child appears with their subjects and levels</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-15</td><td>Try creating another student using the <em>same</em> parent username</td><td>Refused — that username is already taken</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3>3.3 Editing a student — open Diya Rao</h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">ADM-16</td><td>Open Diya Rao from the Students list</td><td>Profile opens on Overview: subject levels, weekly availability, parent access (with the parent’s username)</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-17</td><td>Manage Student → <strong>Details</strong>. Change the grade and save</td><td>Saves. The button reads “Saved”. The change shows on the profile</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-18</td><td>Details → clear the name and try to save</td><td>Save is disabled — a name is required</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-19</td><td>Manage Student → <strong>Subjects</strong></td><td>Each subject shows with its current level in a dropdown</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-20</td><td><strong>Add a subject the child does not have yet</strong>, pick a level, save</td><td>Saves. The new subject appears on the Overview tab</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-21</td><td>Remove a subject (bin icon) — read the warning before saving</td><td>Warns that removing stops new classes for it but keeps everything already recorded</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-22</td><td>Manage Student → <strong>Availability</strong>. Turn a day off and save</td><td>Saves. The Overview tab no longer lists that day</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-23</td><td>Manage Student → <strong>Parent</strong> → “New account”. Add a parent with a username, save</td><td>A temporary password is shown once. The parent is listed with their username</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-24</td><td>Manage Student → Parent → “Existing account”. Pick a parent already in the system</td><td>Links without creating a second login — this is how siblings share one account</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-25</td><td>Click “Reset password” next to a linked parent</td><td>A new temporary password is shown once</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-26</td><td>Manage Student → <strong>Status</strong>. Read the three options</td><td>Active / Inactive / Archived, each explaining what it does. The current one is marked</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-27</td><td>Set a test student to Archived, then look at the Students list</td><td>They disappear from the list. Their record is not deleted</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3 class="pagebreak">3.4 Assigning a student to a teacher — the Classes tab</h3>
+<div class="box note">
+  This is the step that connects everything. Giving a child a subject does <strong>not</strong> put them in
+  front of a teacher — a class does. Until then the teacher never sees them, no attendance is taken, and
+  nothing reaches the parent.
+</div>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">ADM-28</td><td>Open Diya Rao → <strong>Classes</strong> tab</td><td>“Teachers &amp; classes” lists Mathematics (Priya) and English (Meera) with days, time and duration</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-29</td><td>Check the times shown there</td><td>Read as normal school hours — Mon, Wed · 9:00 AM and Tue, Thu · 11:00 AM</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-30</td><td>Look at “Subjects with no teacher yet”</td><td>Telugu L1 is listed: “Assigned to this child, but nobody is teaching it yet”</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-31</td><td>Open <em>Ishaan Rao</em> → Classes tab</td><td>Also shows Telugu as unassigned</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-32</td><td>Now create a Telugu class (see 3.6), then return to Diya → Classes</td><td>Telugu moves out of “no teacher yet” and into the list of classes</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-33</td><td>Open Ishaan → Classes. Under Telugu, click <strong>“Add to this class”</strong> on the class you just made</td><td>Joins the existing class instead of creating a second one. It moves up into his class list</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-34</td><td>Click “Remove from class” on one of a child’s classes</td><td>Removed going forward. Attendance and records already written are untouched</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-35</td><td>Try “Remove from class” on a class that has only one student left</td><td>Refused, with a message to cancel the class from the schedule instead</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3>3.5 Curriculum</h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">ADM-36</td><td>Curriculum → add a new subject</td><td>Created with four levels (L1–L4) automatically</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-37</td><td>Add a heading under a level, then a sub-heading under that heading</td><td>Both save and show who added them and when</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-38</td><td>Assign that new subject to a student (3.3 ADM-20)</td><td>A subject created <em>after</em> a child was enrolled can still be given to them</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-39</td><td>Remove a sub-heading a student has already been ticked against</td><td>It is hidden, not deleted — the child’s history survives</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3>3.6 Scheduling a class</h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">ADM-40</td><td>Schedule → Add class. Pick a student and choose <strong>Telugu</strong></td><td>The Teacher dropdown offers <em>only</em> teachers who can teach Telugu — Rohit Verma</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-41</td><td>Change the subject to Mathematics without touching the teacher</td><td>The teacher choice clears itself, because Rohit cannot teach Maths</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-42</td><td>Pick a subject nobody is assigned to teach</td><td>A message under the Teacher box says no teacher is assigned, and where to fix it</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-43</td><td>Choose Telugu + Rohit, 2 times per week, 60 minutes, then Find Options</td><td>Valid time options appear, each with green ticks for capability, availability and no clashes</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-44</td><td>Pick an option and confirm</td><td>Class created. Rohit gets a notification</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-45</td><td>Now ask for something impossible — e.g. <strong>5 times per week</strong> for a teacher only free on two days</td><td>“No valid times found” <em>and a list of reasons</em> — it should name the actual blocker, not a generic message</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-46</td><td>Look at the Schedule page for the week</td><td>Classes appear on the right days at the right times</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-47</td><td>Cancel a single occurrence from the schedule</td><td>Only that one is cancelled. The rest of the weekly pattern is untouched</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3>3.7 Teachers and accounts</h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">ADM-48</td><td>Teachers → open Priya Sharma → Teaching tab</td><td>Her subjects and level ranges are listed and editable</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-49</td><td>Add a subject to a teacher’s capabilities and save</td><td>Saves. That teacher now appears when scheduling that subject (re-test ADM-40)</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-50</td><td>Set a capability where the “from” level is above the “to” level</td><td>Refused with a clear message</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-51</td><td>Teacher profile → Availability → add a dated exception</td><td>Saved. The normal weekly pattern is unchanged; only that date is affected</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-52</td><td>Deactivate a teacher, then check Admin Home</td><td>They cannot sign in and are not offered for new classes. Everything they recorded stays</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-53</td><td>Reactivate that teacher</td><td>A new temporary password is shown once</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-54</td><td>Accounts page → “Reset password” on any user</td><td>New temporary password shown once</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-55</td><td>Sign in as that user with the temporary password</td><td>Forced to set a new password before anything else is reachable</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">ADM-56</td><td>Notifications (bell icon)</td><td>Lists the missed class-record alerts. Clicking one opens the class it is about</td><td class="res"></td><td></td></tr>
+</table>
+
+<h2 class="pagebreak">4 · Teacher — sign in as <code>priya</code></h2>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">TCH-01</td><td>Look at Home</td><td>“Missed class records — 3 classes were never recorded”, with the subject and date of each</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-02</td><td>Read the wording of that panel</td><td>Explains the deadline passed, they can no longer be recorded, and the administrator has been told</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-03</td><td>Check the times in “Today” and “Upcoming”</td><td>Normal school hours — 9:00 AM, not shifted</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-04</td><td>Open the Students page</td><td>Students are <strong>grouped by subject</strong>, e.g. “MATHEMATICS · 2 STUDENTS”, each with their level</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-05</td><td>Open a student from that list</td><td>Their profile opens. No “Manage Student” button — that is admin-only</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-06</td><td>Try to reach a student Priya does not teach by pasting their URL</td><td>Refused</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-07</td><td>Curriculum → try to add a heading under a subject she teaches</td><td>Allowed</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-08</td><td>Curriculum → try to add a heading under a subject she does <em>not</em> teach</td><td>Not offered / refused</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-09</td><td>Schedule page</td><td>Shows only her own classes, not the whole school’s</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3>4.1 Students who have no class yet — sign in as <code>rohit</code></h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">TCH-10</td><td>Open the Students page</td><td>Shows “TELUGU · 2 STUDENTS” — Diya Rao and Ishaan Rao — even though Rohit has no classes</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-11</td><td>Look at the marker on each row</td><td>Each shows an orange <strong>“Not scheduled”</strong> tag — they are his to teach, but no class exists yet</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-12</td><td>Home page</td><td>No classes today, nothing due</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">TCH-13</td><td>After an admin schedules his Telugu class (ADM-44), reload Students</td><td>The “Not scheduled” tag is gone</td><td class="res"></td><td></td></tr>
+</table>
+
+<h2>5 · Recording a class — sign in as <code>meera</code></h2>
+<div class="box note">
+  A class is recorded <strong>once</strong>, and only between the class starting and <strong>9:00 AM the next
+  morning</strong>. After that it counts as missed and cannot be written.
+</div>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">REC-01</td><td>Look at Home</td><td>Both a “Class records due” list <em>and</em> a “Missed class records” panel</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-02</td><td>Open the class under “Class records due”</td><td>Shows the students, what happened last time, and <strong>the deadline</strong> — “Record this class by 9:00 AM on …”</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-03</td><td>Click Start Class</td><td>Step 1 of 4: Attendance</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-04</td><td>Try to continue without marking everyone</td><td>Continue stays disabled</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-05</td><td>Mark everyone Present, continue. Try to continue with an empty class note</td><td>Continue stays disabled — the class note is never optional</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-06</td><td>Write a class note and continue</td><td>Step 3: the coverage grid — sub-headings down the side, students across the top</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-07</td><td>Look at boxes already ticked</td><td>Anything covered in an earlier class is already ticked, so you only tick what is new</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-08</td><td>Tick one sub-heading for one student. Note down which one</td><td>The box fills in</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-09</td><td>Continue to Review, then Save Class Record</td><td>“Class Record Saved”, listing what was applied — learning updates, observations, and that parents will see it</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-10</td><td><strong>Open the same class again</strong></td><td>“Already recorded” — the form is not offered a second time</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-11</td><td>Go back to Home</td><td>That class is no longer under “Class records due”</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-12</td><td>Open a class from the “Missed” list</td><td>“Recording has closed”, naming the deadline that passed. No form</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-13</td><td>Open a class scheduled for a <em>future</em> date</td><td>Start Class is disabled — “This class has not started yet”</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-14</td><td>Mark a student <strong>Absent</strong> in a new record, then try to write an observation about them</td><td>Nothing is recorded against an absent child</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">REC-15</td><td>Sign in as <code>anjali</code> → Notifications</td><td>The missed-record alerts name the teacher, the subject and the date</td><td class="res"></td><td></td></tr>
+</table>
+
+<h2 class="pagebreak">6 · Parent — one child, sign in as <code>ananya</code></h2>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">PAR-01</td><td>Look at Home</td><td>Aarav’s card, with a <strong>“Studying”</strong> row listing each subject and level</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-02</td><td>Check the “Recently covered” card</td><td>Lists work the teacher has ticked off, newest first, each marked “Covered”</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-03</td><td><strong>Cross-check with REC-08</strong> — is the sub-heading you ticked there?</td><td>Yes. What the teacher records reaches the parent</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-04</td><td>Learning tab → open the subject you ticked</td><td>That sub-heading is marked <strong>Covered</strong>; the rest read “Not yet covered”</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-05</td><td>Check the progress bar on that subject</td><td>The covered count matches what is ticked below</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-06</td><td>Try to change anything on the Learning tab</td><td>Read-only. A parent cannot edit</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-07</td><td>Development tab</td><td>Areas with their current stage and the teacher’s written evidence</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-08</td><td>Moments tab</td><td>Photos and videos, or a clear empty message</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-09</td><td>Check the whole parent area</td><td>No schedule, no drafts, no other family’s children anywhere</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-10</td><td>Is a child switcher shown?</td><td><strong>No</strong> — Ananya has one child, so there is nothing to switch between</td><td class="res"></td><td></td></tr>
+</table>
+
+<h3>6.1 Parent with two children — sign in as <code>vikram</code></h3>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">PAR-11</td><td>Look at the top of Home</td><td>Two chips — Diya Rao and Ishaan Rao — with Diya selected</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-12</td><td>Click <strong>Ishaan Rao</strong></td><td>The card changes to Ishaan, 3rd Grade, studying Telugu L1</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-13</td><td>Now go to the <strong>Learning</strong> tab</td><td>Still showing Ishaan — “Ishaan Rao’s academic progress”. The choice follows you</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-14</td><td>Check Development and Moments too</td><td>Both show Ishaan, with the switcher available on each</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-15</td><td>Switch back to Diya, then reload the page</td><td>Still on Diya — the choice survives a reload</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-16</td><td>While the new child’s data loads, look at the switcher</td><td>It stays on screen, so you can switch again without waiting</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">PAR-17</td><td>Confirm Vikram cannot see Aarav or Kabir anywhere</td><td>Only his own two children</td><td class="res"></td><td></td></tr>
+</table>
+
+<h2>7 · The whole cycle, end to end</h2>
+<p class="sub">If you only have time for one test, do this one. It is the product in a single pass.</p>
+<table>
+  <tr><th class="id">ID</th><th style="width:60mm">What to do</th><th>Expected result</th><th class="res">P / F</th><th class="notes">Notes</th></tr>
+  <tr><td class="id">E2E-01</td><td><strong>anjali</strong> — add a new subject in Curriculum</td><td>Created with L1–L4</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-02</td><td>Add a heading and two sub-headings under L1</td><td>Saved</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-03</td><td>Give that subject to a teacher under Teachers → Teaching</td><td>Saved</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-04</td><td>Open a student → Manage Student → Subjects → add the new subject at L1</td><td>Saved. It shows on their Overview</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-05</td><td>That student’s Classes tab</td><td>The new subject appears under “Subjects with no teacher yet”</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-06</td><td>Schedule a class for it with that teacher, starting today</td><td>Created</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-07</td><td>Sign in as that <strong>teacher</strong> → Students</td><td>The child now appears under the new subject</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-08</td><td>Once the class time has passed, open it from Home and record it — attendance, note, tick one sub-heading, save</td><td>Saved</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-09</td><td>Sign in as that child’s <strong>parent</strong></td><td>The sub-heading you ticked is under “Recently covered”, and marked Covered on the Learning tab</td><td class="res"></td><td></td></tr>
+  <tr><td class="id">E2E-10</td><td>Back as the teacher — open that class again</td><td>“Already recorded”</td><td class="res"></td><td></td></tr>
+</table>
+
+<h2>8 · Please don’t report these — already known</h2>
+<div class="box warn">
+  <ul>
+    <li><strong>A teacher can edit coverage for subjects they don’t teach.</strong> Opening any student they can see lets them tick any subject, not only their own.</li>
+    <li><strong>The app is slow to load on first open.</strong> The main bundle is about 1 MB; the database is hosted, so some screens take a second or two.</li>
+    <li><strong>Moments are empty</strong> in the demo data — uploading is untested here.</li>
+    <li><strong>Weekly updates</strong> have to be generated by an admin before a parent sees one, so “No weekly update yet” is expected on a fresh seed.</li>
+    <li><strong>Web push notifications are off.</strong> In-app notifications (the bell) are the only channel.</li>
+    <li><strong>Voice recording / AI</strong> is not built yet — the class record is typed by hand by design.</li>
+  </ul>
+</div>
+
+<h2>9 · Reporting something</h2>
+<p>For anything that fails, please note down:</p>
+<ol>
+  <li>The <strong>case ID</strong> (e.g. ADM-20) — or the screen, if it wasn’t in this list.</li>
+  <li>Which <strong>account</strong> you were signed in as.</li>
+  <li>What you <strong>expected</strong> versus what actually happened.</li>
+  <li>A <strong>screenshot</strong> if the screen looked wrong.</li>
+  <li>Whether it happens <strong>every time</strong> or only once.</li>
+</ol>
+<p>
+  If a whole screen fails to load, press <code>F12</code>, open the <strong>Console</strong> tab, reload, and
+  screenshot anything in red — that usually says exactly what broke.
+</p>
+
+<div class="foot">
+  Valmiki International Gurukulam — Learning Management System · Manual test plan ·
+  118 cases across 6 accounts and 3 roles
+</div>

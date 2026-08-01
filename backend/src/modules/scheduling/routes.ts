@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  addClassStudentsSchema,
   applyMovesSchema,
   cancelOccurrenceSchema,
   confirmScheduleSchema,
@@ -62,6 +63,26 @@ export const classesRouter = Router();
 classesRouter.get(
   '/:id',
   handler(async (req, res) => ok(res, await service.getClass(req.params.id))),
+);
+
+/**
+ * Joining an existing class, rather than creating a second one for the same
+ * subject, level and teacher. This is how a child assigned a new subject ends up
+ * in front of the teacher who already teaches it.
+ */
+classesRouter.post(
+  '/:id/students',
+  adminOnly,
+  validateBody(addClassStudentsSchema),
+  handler(async (req, res) => ok(res, await service.addClassStudents(req.params.id, req.body, auth(req).userId))),
+);
+
+classesRouter.delete(
+  '/:id/students/:studentId',
+  adminOnly,
+  handler(async (req, res) =>
+    ok(res, await service.removeClassStudent(req.params.id, req.params.studentId, auth(req).userId)),
+  ),
 );
 
 export const occurrencesRouter = Router();

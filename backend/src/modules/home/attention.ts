@@ -2,6 +2,7 @@ import type { AttentionIssueDto } from '@vig/shared';
 import { formatShortDate, formatInstantTime, toHHMM, toMinutes } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { isAvailableFor, resolveAvailability } from '../scheduling/availability.js';
+import { recordWindowState } from '../classrecord/window.js';
 
 /**
  * Needs Attention is derived, never stored (AD-06).
@@ -97,7 +98,13 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
     }),
     prisma.student.findMany({
       where: { status: 'ACTIVE' },
-      include: { subjectLevels: { where: { isCurrent: true } }, availability: true },
+      include: {
+        subjectLevels: { where: { isCurrent: true }, include: { subject: true } },
+        availability: true,
+        // Which subjects somebody is actually teaching them — an assignment with
+        // no class means the child is studying it on paper only.
+        classes: { include: { class: { select: { subjectId: true, status: true } } } },
+      },
     }),
     prisma.classOccurrence.findMany({
       where: {
@@ -234,6 +241,18 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
     const missing: string[] = [];
     if (s.subjectLevels.length === 0) missing.push('subject levels');
     if (s.availability.length === 0) missing.push('weekly availability');
+
+    // A subject added to a child after enrolment is easy to leave stranded: it
+    // shows on their profile and in the parent portal, but no teacher ever sees
+    // them for it until a class exists.
+    const taught = new Set(
+      s.classes.filter((cs) => cs.class.status !== 'ARCHIVED').map((cs) => cs.class.subjectId),
+    );
+    const untaught = s.subjectLevels.filter((sl) => !taught.has(sl.subjectId));
+    if (untaught.length > 0) {
+      missing.push(`a class for ${untaught.map((sl) => sl.subject.name).join(' and ')}`);
+    }
+
     if (missing.length === 0) continue;
 
     issues.set(`INCOMPLETE_STUDENT_SETUP:${s.id}`, {
@@ -250,19 +269,36 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
     });
   }
 
-  // --- 5. Class records overdue ---------------------------------------------
+  // --- 5. Class records: still due, versus missed for good -------------------
+  //
+  // These need different responses. An outstanding record can still be written
+  // by the teacher; a missed one cannot — the deadline passed, the class is
+  // undocumented, and only an admin can now do anything about it.
   for (const o of overdue) {
+    const closed = recordWindowState(o.scheduledStart, now) === 'CLOSED';
+
     push(
-      {
-        groupKey: `CLASS_RECORD_OVERDUE:${o.teacherId}`,
-        type: 'CLASS_RECORD_OVERDUE',
-        title: `${o.teacher.user.fullName} has class records outstanding`,
-        detail: 'These classes have finished but have no saved record.',
-        severity: 'warning',
-        actionLabel: 'Review',
-        actionHref: `/admin/schedule?date=${o.scheduledStart.toISOString().slice(0, 10)}`,
-        affected: [],
-      },
+      closed
+        ? {
+            groupKey: `CLASS_RECORD_MISSED:${o.teacherId}`,
+            type: 'CLASS_RECORD_OVERDUE',
+            title: `${o.teacher.user.fullName} missed the deadline on some class records`,
+            detail: 'These classes were never recorded and can no longer be recorded by the teacher.',
+            severity: 'danger',
+            actionLabel: 'Review',
+            actionHref: `/admin/schedule?date=${o.scheduledStart.toISOString().slice(0, 10)}`,
+            affected: [],
+          }
+        : {
+            groupKey: `CLASS_RECORD_OVERDUE:${o.teacherId}`,
+            type: 'CLASS_RECORD_OVERDUE',
+            title: `${o.teacher.user.fullName} has class records outstanding`,
+            detail: 'These classes have finished but have no saved record yet.',
+            severity: 'warning',
+            actionLabel: 'Review',
+            actionHref: `/admin/schedule?date=${o.scheduledStart.toISOString().slice(0, 10)}`,
+            affected: [],
+          },
       {
         id: o.id,
         label: o.class.subject.name,

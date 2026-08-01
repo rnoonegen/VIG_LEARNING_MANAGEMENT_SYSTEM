@@ -293,6 +293,23 @@ export const cancelOccurrenceSchema = z.object({
   reason: z.string().optional(),
 });
 
+/**
+ * Adding a child to a class that already runs.
+ *
+ * The alternative — a second class for the same subject, level and teacher —
+ * splits one group's history in two, so joining is the normal path and creating
+ * a class is for when none fits.
+ */
+export const addClassStudentsSchema = z.object({
+  studentIds: z.array(uuid).min(1, 'Pick at least one student'),
+  /**
+   * Accepts the join despite a soft warning (outside their stated availability).
+   * Hard blockers ignore this.
+   */
+  acceptWarnings: z.boolean().default(false),
+});
+export type AddClassStudentsInput = z.infer<typeof addClassStudentsSchema>;
+
 /** Rescheduling: the admin picks affected occurrences, the engine revalidates. */
 export const proposeMovesSchema = z.object({
   occurrenceIds: z.array(uuid).min(1),

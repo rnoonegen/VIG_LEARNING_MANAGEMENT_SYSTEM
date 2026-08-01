@@ -66,9 +66,29 @@ export function errorMiddleware(
     return;
   }
 
+  /**
+   * A dropped database connection is not a bug in the request.
+   *
+   * Pooled Postgres closes idle connections; the pool can hand out a socket the
+   * server has already gone away from, which arrives here as P1001/P1002/P1017
+   * (or, on Windows, "An existing connection was forcibly closed by the remote
+   * host"). Retrying genuinely works, so the response says so instead of
+   * reporting a fault the admin cannot act on.
+   */
+  const prismaCode = (err as { code?: string })?.code;
+  if (prismaCode && ['P1001', 'P1002', 'P1017'].includes(prismaCode)) {
+    console.error('[api] database connection error:', prismaCode, String(err).split('\n')[0]);
+    res.status(503).json({
+      error: {
+        code: 'DATABASE_UNAVAILABLE',
+        message: 'The database connection dropped. Please try that again.',
+      },
+    });
+    return;
+  }
+
   // Prisma's unique-constraint violation is the one runtime error common enough
   // to deserve a readable message rather than a generic 500.
-  const prismaCode = (err as { code?: string })?.code;
   if (prismaCode === 'P2002') {
     res.status(409).json({
       error: { code: 'CONFLICT', message: 'That already exists. Try a different value.' },

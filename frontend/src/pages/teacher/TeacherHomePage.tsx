@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays } from 'lucide-react';
+import { AlertTriangle, CalendarDays } from 'lucide-react';
 import type { TeacherHomeDto } from '@vig/shared';
+import { formatShortDate } from '@vig/shared';
 import { get } from '@/lib/api';
 import { Section } from '@/components/ui/Layout';
+import { Card } from '@/components/ui/Card';
 import { AllClear, EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
 import { OccurrenceRow } from '@/components/OccurrenceRow';
 
@@ -40,8 +42,45 @@ export function TeacherHomePage() {
             ))}
           </div>
           <p className="mt-2 text-xs text-ink-2">
-            These classes have finished but have no saved record yet.
+            These classes have finished but have no saved record yet. Each closes at 9:00 AM the morning
+            after the class.
           </p>
+        </Section>
+      ) : null}
+
+      {/* Missed records are not a work queue — the deadline has gone and the
+          classes cannot be written up. The count is the message. */}
+      {data.missedRecords.total > 0 ? (
+        <Section title="Missed class records">
+          <Card tone="warning">
+            <p className="flex items-center gap-2 text-sm font-medium text-ink">
+              <AlertTriangle size={16} className="shrink-0 text-warning" />
+              {data.missedRecords.total} {data.missedRecords.total === 1 ? 'class was' : 'classes were'}{' '}
+              never recorded
+            </p>
+            <p className="mt-1 text-xs text-ink-2">
+              The deadline passed on {data.missedRecords.total === 1 ? 'this class' : 'these classes'}, so
+              they can no longer be recorded. Your administrator has been notified.
+            </p>
+
+            <ul className="mt-3 flex flex-col gap-1.5">
+              {data.missedRecords.recent.map((o) => (
+                <li key={o.id} className="flex justify-between gap-3 text-xs">
+                  <span className="min-w-0 truncate text-ink">
+                    {o.subjectName} · {o.levelName}
+                  </span>
+                  <span className="shrink-0 text-ink-3">
+                    {formatShortDate(new Date(o.scheduledStart))}
+                  </span>
+                </li>
+              ))}
+              {data.missedRecords.total > data.missedRecords.recent.length ? (
+                <li className="text-xs text-ink-3">
+                  and {data.missedRecords.total - data.missedRecords.recent.length} more
+                </li>
+              ) : null}
+            </ul>
+          </Card>
         </Section>
       ) : null}
 

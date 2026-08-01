@@ -92,7 +92,10 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const NOTIFICATION_LABELS: Record<NotificationType, string> = {
   WEEKLY_UPDATE_READY: 'Weekly update ready',
   SCHEDULE_CHANGED: 'Schedule changed',
-  CLASS_RECORD_DUE: 'Class record due',
+  // Covers both readings: a record still owed, and one whose deadline passed.
+  // The title carries which; a label saying "due" under "missed 1 class record"
+  // contradicts it.
+  CLASS_RECORD_DUE: 'Class record',
   AVAILABILITY_CONFLICT: 'Availability conflict',
   TEACHER_AVAILABILITY_CHANGE: 'Teacher availability change',
   STUDENT_AVAILABILITY_CHANGE: 'Student availability change',

@@ -19,6 +19,9 @@ const findFirstParentStudent = vi.fn();
 const findManyParentStudent = vi.fn();
 const findFirstClassStudent = vi.fn();
 const findManyClassStudent = vi.fn();
+const findManyCapability = vi.fn();
+const findFirstSubjectLevel = vi.fn();
+const findManySubjectLevel = vi.fn();
 
 vi.mock('../prisma.js', () => ({
   prisma: {
@@ -30,6 +33,11 @@ vi.mock('../prisma.js', () => ({
     classStudent: {
       findFirst: (...a: unknown[]) => findFirstClassStudent(...a),
       findMany: (...a: unknown[]) => findManyClassStudent(...a),
+    },
+    teacherCapability: { findMany: (...a: unknown[]) => findManyCapability(...a) },
+    studentSubjectLevel: {
+      findFirst: (...a: unknown[]) => findFirstSubjectLevel(...a),
+      findMany: (...a: unknown[]) => findManySubjectLevel(...a),
     },
   },
 }));
@@ -60,7 +68,15 @@ const PARENT = ctx({ role: 'PARENT', parentId: 'parent-ananya' });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: the teacher holds no subject, so capability never widens the scope
+  // unless a test says otherwise.
+  findManyCapability.mockResolvedValue([]);
+  findFirstSubjectLevel.mockResolvedValue(null);
+  findManySubjectLevel.mockResolvedValue([]);
+  findManyClassStudent.mockResolvedValue([]);
 });
+
+const SANSKRIT_LEVELS_1_TO_3 = [{ subjectId: 'sanskrit', minLevelOrder: 0, maxLevelOrder: 2 }];
 
 describe('assertTeacherOwnsOccurrence', () => {
   it('lets an admin through without querying', async () => {
@@ -137,16 +153,48 @@ describe('assertCanReadStudent', () => {
     await expect(assertCanReadStudent(ADMIN, 'anyone')).resolves.toBeUndefined();
   });
 
-  it('teacher may read a student they teach', async () => {
+  it('teacher may read a student in one of their classes', async () => {
     findFirstClassStudent.mockResolvedValue({ studentId: 'aarav' });
     await expect(assertCanReadStudent(PRIYA, 'aarav')).resolves.toBeUndefined();
+    // The class link settles it; capability is never consulted.
+    expect(findManyCapability).not.toHaveBeenCalled();
   });
 
-  it('teacher may not read a student they do not teach', async () => {
+  it('teacher may read a student assigned a subject and level they hold', async () => {
     findFirstClassStudent.mockResolvedValue(null);
-    await expect(assertCanReadStudent(PRIYA, 'stranger')).rejects.toThrow(
-      /not in any of your classes/i,
+    findManyCapability.mockResolvedValue(SANSKRIT_LEVELS_1_TO_3);
+    findFirstSubjectLevel.mockResolvedValue({ studentId: 'aarav' });
+
+    await expect(assertCanReadStudent(PRIYA, 'aarav')).resolves.toBeUndefined();
+
+    // The level range is part of the query, not a filter applied afterwards.
+    expect(findFirstSubjectLevel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          studentId: 'aarav',
+          isCurrent: true,
+          OR: [
+            { subjectId: 'sanskrit', level: { displayOrder: { gte: 0, lte: 2 } } },
+          ],
+        }),
+      }),
     );
+  });
+
+  it('teacher may not read a student who is neither scheduled nor theirs by subject', async () => {
+    findFirstClassStudent.mockResolvedValue(null);
+    findManyCapability.mockResolvedValue(SANSKRIT_LEVELS_1_TO_3);
+    findFirstSubjectLevel.mockResolvedValue(null);
+
+    await expect(assertCanReadStudent(PRIYA, 'stranger')).rejects.toThrow(/not one of yours/i);
+  });
+
+  it('teacher with no capabilities falls back to their classes alone', async () => {
+    findFirstClassStudent.mockResolvedValue(null);
+    findManyCapability.mockResolvedValue([]);
+
+    await expect(assertCanReadStudent(PRIYA, 'stranger')).rejects.toThrow(/not one of yours/i);
+    expect(findFirstSubjectLevel).not.toHaveBeenCalled();
   });
 
   it('parent is routed through the linked-child check', async () => {
@@ -172,7 +220,7 @@ describe('readableStudentIds — list scoping', () => {
     await expect(readableStudentIds(PARENT)).resolves.toEqual(['aarav', 'diya']);
   });
 
-  it('returns only students in the teacher’s own classes', async () => {
+  it('returns only students in the teacher’s own classes when they hold no subject', async () => {
     findManyClassStudent.mockResolvedValue([{ studentId: 'aarav' }]);
     await expect(readableStudentIds(PRIYA)).resolves.toEqual(['aarav']);
 
@@ -181,6 +229,14 @@ describe('readableStudentIds — list scoping', () => {
         where: expect.objectContaining({ class: { teacherId: 'teacher-priya' } }),
       }),
     );
+  });
+
+  it('adds the students assigned a subject the teacher holds, without duplicating', async () => {
+    findManyClassStudent.mockResolvedValue([{ studentId: 'aarav' }]);
+    findManyCapability.mockResolvedValue(SANSKRIT_LEVELS_1_TO_3);
+    findManySubjectLevel.mockResolvedValue([{ studentId: 'aarav' }, { studentId: 'diya' }]);
+
+    await expect(readableStudentIds(PRIYA)).resolves.toEqual(['aarav', 'diya']);
   });
 
   it('returns an empty set — never ALL — when scoping cannot be established', async () => {

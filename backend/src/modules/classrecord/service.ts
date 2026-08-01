@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import type { AttendanceEntryDto, ClassContextDto, ClassRecordDraft } from '@vig/shared';
+import { formatShortDate } from '@vig/shared';
 import { prisma } from '../../prisma.js';
+import { describeDeadline, recordState, recordWindow, MAX_WINDOW_MS, MIN_WINDOW_MS } from './window.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { container } from '../../ai/container.js';
@@ -8,6 +10,7 @@ import { toOccurrenceDto } from '../scheduling/service.js';
 import { headingsForLevel } from '../curriculum/service.js';
 import { coveredByStudent } from '../learning/coverage.js';
 import { avatarStorage, signMany } from '../../lib/storage.js';
+import { notifyAllAdmins } from '../notifications/service.js';
 
 /**
  * The class record is where the whole product converges (BR-01): attendance, the
@@ -26,6 +29,52 @@ const occurrenceInclude = {
   teacher: { include: { user: { select: { fullName: true } } } },
   classRecord: { select: { id: true, status: true } },
 } satisfies Prisma.ClassOccurrenceInclude;
+
+/**
+ * The write gate for everything that hangs off a class record.
+ *
+ * A class is recorded once, between its start and the following morning
+ * (window.ts). Enforced for teachers, whose deadline this is; an admin is left a
+ * way in, because a missed record is surfaced to them to resolve and locking
+ * everyone out would make it permanently unresolvable.
+ */
+export async function assertRecordable(occurrenceId: string, enforce: boolean) {
+  const occurrence = await prisma.classOccurrence.findUnique({
+    where: { id: occurrenceId },
+    select: {
+      id: true,
+      scheduledStart: true,
+      status: true,
+      classRecord: { select: { status: true } },
+    },
+  });
+  if (!occurrence) throw notFound('Class');
+
+  if (occurrence.status === 'CANCELLED') {
+    throw badRequest('This class was cancelled, so there is nothing to record.');
+  }
+
+  const state = recordState(occurrence.scheduledStart, occurrence.classRecord?.status, new Date());
+
+  // One record per class, for everybody — an admin cannot overwrite one either.
+  if (state === 'SAVED') {
+    throw badRequest('This class has already been recorded. A class is recorded once.');
+  }
+  if (!enforce) return occurrence;
+
+  if (state === 'NOT_YET_OPEN') {
+    throw badRequest('This class has not started yet. You can record it once it begins.');
+  }
+  if (state === 'CLOSED') {
+    const { closesAt } = recordWindow(occurrence.scheduledStart);
+    throw badRequest(
+      `Recording for this class closed at ${describeDeadline(closesAt)} on ${formatShortDate(closesAt)}. ` +
+        'Ask an administrator if it still needs to be recorded.',
+    );
+  }
+
+  return occurrence;
+}
 
 /** Before a class: who is in it, what happened last time, what can be recorded. */
 export async function getContext(occurrenceId: string): Promise<ClassContextDto> {
@@ -62,8 +111,21 @@ export async function getContext(occurrenceId: string): Promise<ClassContextDto>
     headings.flatMap((h) => h.subHeadings.map((s) => s.id)),
   );
 
+  const window = recordWindow(occurrence.scheduledStart);
+  const saved = await prisma.classRecord.findUnique({
+    where: { occurrenceId },
+    select: { savedAt: true },
+  });
+
   return {
     occurrence: toOccurrenceDto(occurrence),
+    record: {
+      state: recordState(occurrence.scheduledStart, occurrence.classRecord?.status, new Date()),
+      opensAt: window.opensAt.toISOString(),
+      closesAt: window.closesAt.toISOString(),
+      closesAtLabel: `${describeDeadline(window.closesAt)} on ${formatShortDate(window.closesAt)}`,
+      savedAt: saved?.savedAt?.toISOString() ?? null,
+    },
     students: occurrence.class.students.map((cs) => ({
       id: cs.student.id,
       fullName: cs.student.fullName,
@@ -86,7 +148,11 @@ export async function getContext(occurrenceId: string): Promise<ClassContextDto>
 export async function putAttendance(
   occurrenceId: string,
   entries: Array<{ studentId: string; status: 'PRESENT' | 'ABSENT' | 'LATE'; note?: string }>,
+  enforceWindow = true,
 ) {
+  // Attendance is part of the record, so it lives or dies by the same deadline.
+  await assertRecordable(occurrenceId, enforceWindow);
+
   const occurrence = await prisma.classOccurrence.findUnique({
     where: { id: occurrenceId },
     include: { class: { include: { students: true } } },
@@ -139,20 +205,15 @@ export async function getAttendance(occurrenceId: string): Promise<AttendanceEnt
  * the record through TRANSCRIBING → PROCESSING before IN_REVIEW.
  * See docs/DEFERRED-AI.md §2.3.
  */
-export async function openDraft(occurrenceId: string, authorId: string) {
-  const occurrence = await prisma.classOccurrence.findUnique({ where: { id: occurrenceId } });
-  if (!occurrence) throw notFound('Class');
+export async function openDraft(occurrenceId: string, authorId: string, enforceWindow = true) {
+  await assertRecordable(occurrenceId, enforceWindow);
 
   const record = await prisma.classRecord.upsert({
     where: { occurrenceId },
     create: { occurrenceId, authorId, status: 'DRAFT' },
     update: {},
-    include: { observations: true },
   });
 
-  if (record.status === 'SAVED') {
-    throw badRequest('This class record has already been saved.');
-  }
   return getRecord(record.id);
 }
 
@@ -186,10 +247,14 @@ export async function getRecord(recordId: string) {
 }
 
 /** Saves work-in-progress without committing anything to a student's history. */
-export async function patchDraft(recordId: string, draft: Partial<ClassRecordDraft>) {
+export async function patchDraft(
+  recordId: string,
+  draft: Partial<ClassRecordDraft>,
+  enforceWindow = true,
+) {
   const record = await prisma.classRecord.findUnique({ where: { id: recordId } });
   if (!record) throw notFound('Class record');
-  if (record.status === 'SAVED') throw badRequest('This class record has already been saved.');
+  await assertRecordable(record.occurrenceId, enforceWindow);
 
   await prisma.classRecord.update({
     where: { id: recordId },
@@ -214,7 +279,12 @@ export async function patchDraft(recordId: string, draft: Partial<ClassRecordDra
  *     update is skipped (BR-02).
  *   - Absent students receive no observations or updates (BR-15).
  */
-export async function saveRecord(recordId: string, draft: ClassRecordDraft, authorId: string) {
+export async function saveRecord(
+  recordId: string,
+  draft: ClassRecordDraft,
+  authorId: string,
+  enforceWindow = true,
+) {
   const record = await prisma.classRecord.findUnique({
     where: { id: recordId },
     include: {
@@ -227,7 +297,10 @@ export async function saveRecord(recordId: string, draft: ClassRecordDraft, auth
     },
   });
   if (!record) throw notFound('Class record');
-  if (record.status === 'SAVED') throw badRequest('This class record has already been saved.');
+
+  // Refuses a second save and a save past the deadline, in one place.
+  await assertRecordable(record.occurrenceId, enforceWindow);
+
   if (!draft.overallClassNote.trim()) throw badRequest('The overall class note is required.');
 
   const absent = new Set(
@@ -399,6 +472,112 @@ export async function buildDraft(occurrenceId: string, manualDraft: ClassRecordD
   });
 }
 
+// ---------------------------------------------------------------------------
+// Missed records
+// ---------------------------------------------------------------------------
+
+/**
+ * Occurrences whose recording deadline passed with nothing written.
+ *
+ * The cutoff snaps to a wall-clock hour, so a window is between 9 and 33 hours
+ * long and no single date comparison expresses "closed". The query narrows to
+ * the band where the answer is uncertain and the exact rule settles those rows,
+ * which keeps this a bounded read however long the school has been running.
+ */
+export async function findMissedRecords(where: Prisma.ClassOccurrenceWhereInput, now = new Date()) {
+  const unwritten: Prisma.ClassOccurrenceWhereInput = {
+    ...where,
+    status: { not: 'CANCELLED' },
+    OR: [{ classRecord: null }, { classRecord: { status: { not: 'SAVED' } } }],
+  };
+
+  const [certain, ambiguous] = await Promise.all([
+    // Started longer ago than the longest possible window: certainly closed.
+    prisma.classOccurrence.findMany({
+      where: { ...unwritten, scheduledStart: { lt: new Date(+now - MAX_WINDOW_MS) } },
+      include: occurrenceInclude,
+      orderBy: { scheduledStart: 'desc' },
+    }),
+    // Inside the band where it depends on the class's own start time.
+    prisma.classOccurrence.findMany({
+      where: {
+        ...unwritten,
+        scheduledStart: { gte: new Date(+now - MAX_WINDOW_MS), lt: new Date(+now - MIN_WINDOW_MS) },
+      },
+      include: occurrenceInclude,
+      orderBy: { scheduledStart: 'desc' },
+    }),
+  ]);
+
+  const missed = [
+    ...certain,
+    ...ambiguous.filter((o) => recordState(o.scheduledStart, o.classRecord?.status, now) === 'CLOSED'),
+  ];
+
+  return missed.sort((a, b) => +b.scheduledStart - +a.scheduledStart);
+}
+
+/**
+ * Tells every admin which teacher let a recording deadline pass.
+ *
+ * Grouped per teacher per day rather than per class: notification volume is a
+ * locked product rule (BR-14), and three missed classes on one day is one thing
+ * that went wrong, not three. The existing notification is the idempotency key,
+ * so running this hourly does not re-announce yesterday.
+ */
+export async function sweepMissedRecords(now = new Date()): Promise<number> {
+  // A first run on an old database should not spam months of history.
+  const lookback = new Date(+now - 7 * 24 * 60 * 60 * 1000);
+  const missed = await findMissedRecords({ scheduledStart: { gte: lookback } }, now);
+  if (missed.length === 0) return 0;
+
+  const groups = new Map<string, { teacherName: string; occurrences: typeof missed }>();
+  for (const o of missed) {
+    const dateKey = o.scheduledStart.toISOString().slice(0, 10);
+    const key = `${o.teacherId}:${dateKey}`;
+    const group = groups.get(key);
+    if (group) group.occurrences.push(o);
+    else groups.set(key, { teacherName: o.teacher.user.fullName, occurrences: [o] });
+  }
+
+  let announced = 0;
+
+  for (const [groupKey, group] of groups) {
+    const already = await prisma.notification.findFirst({
+      where: {
+        type: 'CLASS_RECORD_DUE',
+        payload: { path: ['groupKey'], equals: groupKey },
+      },
+      select: { id: true },
+    });
+    if (already) continue;
+
+    const count = group.occurrences.length;
+    const date = group.occurrences[0]!.scheduledStart;
+
+    await notifyAllAdmins({
+      // Reuses the class-record notification type rather than adding a database
+      // enum value for a message that is read, not queried.
+      type: 'CLASS_RECORD_DUE',
+      title: `${group.teacherName} missed ${count} class ${count === 1 ? 'record' : 'records'}`,
+      body: `${group.occurrences
+        .map((o) => o.class.subject.name)
+        .join(', ')} on ${formatShortDate(date)} — the deadline to record has passed.`,
+      payload: {
+        groupKey,
+        teacherId: group.occurrences[0]!.teacherId,
+        occurrenceIds: group.occurrences.map((o) => o.id),
+        // Singular too: the notification list builds its deep link from this,
+        // so without it the card is unclickable.
+        occurrenceId: group.occurrences[0]!.id,
+      },
+    });
+    announced += 1;
+  }
+
+  return announced;
+}
+
 /** The teacher's own queue for a given day. */
 export async function teacherOccurrences(teacherId: string, dateKey: string) {
   const start = new Date(`${dateKey}T00:00:00.000Z`);
@@ -410,5 +589,5 @@ export async function teacherOccurrences(teacherId: string, dateKey: string) {
     include: occurrenceInclude,
     orderBy: { scheduledStart: 'asc' },
   });
-  return rows.map(toOccurrenceDto);
+  return rows.map((o) => toOccurrenceDto(o));
 }

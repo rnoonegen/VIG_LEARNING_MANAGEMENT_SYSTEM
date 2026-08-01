@@ -60,9 +60,12 @@ export async function listTeachers(): Promise<TeacherSummaryDto[]> {
           const min = names?.get(c.minLevelOrder) ?? `Level ${c.minLevelOrder + 1}`;
           const max = names?.get(c.maxLevelOrder) ?? `Level ${c.maxLevelOrder + 1}`;
           return {
+            subjectId: c.subjectId,
             name: c.subject.name,
             levelRange: min === max ? min : `${min} – ${max}`,
             colorToken: c.subject.colorToken,
+            minLevelOrder: c.minLevelOrder,
+            maxLevelOrder: c.maxLevelOrder,
           };
         }),
         // A deactivated teacher has no teaching day, whatever their weekly

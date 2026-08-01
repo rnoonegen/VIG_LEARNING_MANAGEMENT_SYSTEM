@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Check, Plus, Trash2 } from 'lucide-react';
+import { Check } from 'lucide-react';
 import type { StudentDto, SubjectDto } from '@vig/shared';
 import { WEEKDAY_LABELS } from '@vig/shared';
 import { errorMessage, get, post } from '@/lib/api';
@@ -11,16 +11,12 @@ import { Card, CardHeader } from '@/components/ui/Card';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { LoadingState } from '@/components/ui/States';
 import { AvailabilityGrid, fromDayRows, toDayRows, type DayAvailability } from '@/components/AvailabilityGrid';
+import { SubjectLevelEditor, type SubjectLevelDraft } from '@/components/SubjectLevelEditor';
 import { TempPasswordModal } from '../teachers/TeachersPage';
 import { cn } from '@/lib/ui';
 
 const STEPS = ['Basics', 'Subjects', 'Availability', 'Parent', 'Review'] as const;
 type Step = (typeof STEPS)[number];
-
-interface SubjectLevelDraft {
-  subjectId: string;
-  levelId: string;
-}
 
 /**
  * Adding a student is more than entering a name (F6): VIG needs subjects, a level
@@ -155,11 +151,7 @@ export function AddStudentPage() {
               title="Subjects & levels"
               description="Select the subjects this child studies and set their current level in each."
             />
-            <SubjectLevelEditor
-              subjects={subjects ?? []}
-              value={subjectLevels}
-              onChange={setSubjectLevels}
-            />
+            <SubjectLevelEditor subjects={subjects ?? []} value={subjectLevels} onChange={setSubjectLevels} />
           </>
         ) : null}
 
@@ -237,13 +229,9 @@ export function AddStudentPage() {
               </ReviewBlock>
 
               <ReviewBlock title="Subject levels">
-                {subjectLevels.map((sl) => {
-                  const subject = subjects?.find((s) => s.id === sl.subjectId);
-                  const level = subject?.levels?.find((l) => l.id === sl.levelId);
-                  return (
-                    <ReviewLine key={sl.subjectId} label={subject?.name ?? ''} value={level?.name ?? '—'} />
-                  );
-                })}
+                {subjectLevels.map((sl) => (
+                  <ReviewSubjectLine key={sl.subjectId} draft={sl} />
+                ))}
               </ReviewBlock>
 
               <ReviewBlock title="Weekly availability">
@@ -298,93 +286,19 @@ export function AddStudentPage() {
   );
 }
 
-function SubjectLevelEditor({
-  subjects,
-  value,
-  onChange,
-}: {
-  subjects: SubjectDto[];
-  value: SubjectLevelDraft[];
-  onChange: (next: SubjectLevelDraft[]) => void;
-}) {
-  const unused = subjects.filter((s) => !value.some((v) => v.subjectId === s.id));
-
-  return (
-    <div className="flex flex-col gap-3">
-      {value.map((row, index) => (
-        <SubjectLevelRow
-          key={row.subjectId}
-          row={row}
-          onChange={(next) => onChange(value.map((v, i) => (i === index ? next : v)))}
-          onRemove={() => onChange(value.filter((_, i) => i !== index))}
-        />
-      ))}
-
-      {unused.length > 0 ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Plus size={14} />}
-          onClick={() => onChange([...value, { subjectId: unused[0]!.id, levelId: '' }])}
-        >
-          Add subject
-        </Button>
-      ) : null}
-
-      {value.length === 0 ? (
-        <p className="rounded-[12px] bg-warning-bg px-3 py-2.5 text-xs text-ink-2">
-          A student needs at least one subject before they can be scheduled.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function SubjectLevelRow({
-  row,
-  onChange,
-  onRemove,
-}: {
-  row: SubjectLevelDraft;
-  onChange: (next: SubjectLevelDraft) => void;
-  onRemove: () => void;
-}) {
+/**
+ * The subject list endpoint carries level counts but not the levels themselves,
+ * so the chosen level name is read from the single-subject query the editor has
+ * already warmed.
+ */
+function ReviewSubjectLine({ draft }: { draft: SubjectLevelDraft }) {
   const { data: subject } = useQuery({
-    queryKey: ['curriculum', 'subject', row.subjectId],
-    queryFn: () => get<SubjectDto>(`/curriculum/subjects/${row.subjectId}`),
+    queryKey: ['curriculum', 'subject', draft.subjectId],
+    queryFn: () => get<SubjectDto>(`/curriculum/subjects/${draft.subjectId}`),
   });
 
-  return (
-    <div className="flex items-end gap-3 rounded-[12px] border border-line p-3">
-      <div className="min-w-0 flex-1">
-        <Field label="Subject">
-          <Input value={subject?.name ?? '…'} readOnly disabled className="bg-lavender-2" />
-        </Field>
-      </div>
-
-      <div className="min-w-[140px]">
-        <Field label="Current level">
-          <Select value={row.levelId} onChange={(e) => onChange({ ...row, levelId: e.target.value })}>
-            <option value="">Select…</option>
-            {subject?.levels?.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </div>
-
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Remove subject"
-        className="touch-target mb-1 flex items-center justify-center rounded-full text-ink-3 hover:bg-danger-bg hover:text-danger"
-      >
-        <Trash2 size={15} />
-      </button>
-    </div>
-  );
+  const level = subject?.levels?.find((l) => l.id === draft.levelId);
+  return <ReviewLine label={subject?.name ?? '…'} value={level?.name ?? '—'} />;
 }
 
 function ReviewBlock({ title, children }: { title: string; children: React.ReactNode }) {

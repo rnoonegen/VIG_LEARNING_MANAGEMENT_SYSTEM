@@ -19,6 +19,7 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { SEED_DEVELOPMENT_AREAS, addDays, startOfWeek } from '@vig/shared';
 import { env, supabaseConfigured } from '../backend/src/env.js';
 import { supabaseAdmin, usernameToEmail } from '../backend/src/lib/supabase.js';
+import { recordState } from '../backend/src/modules/classrecord/window.js';
 
 const prisma = new PrismaClient();
 
@@ -213,12 +214,19 @@ async function seedDemo() {
   const adminUser = await ensureUser('anjali', 'Anjali Rao', 'ADMIN');
   const priyaUser = await ensureUser('priya', 'Priya Sharma', 'TEACHER');
   const meeraUser = await ensureUser('meera', 'Meera Reddy', 'TEACHER');
+  // Holds a subject but has no class yet — the case where a teacher sees their
+  // students through capability alone, before anything is scheduled.
+  const rohitUser = await ensureUser('rohit', 'Rohit Verma', 'TEACHER');
   const parentUser = await ensureUser('ananya', 'Ananya Sharma', 'PARENT');
-  console.log('  · 4 accounts (admin, 2 teachers, 1 parent)');
+  // A second parent, linked to two children, so the sibling case is exercised.
+  const parent2User = await ensureUser('vikram', 'Vikram Rao', 'PARENT');
+  console.log('  · 6 accounts (admin, 3 teachers, 2 parents)');
 
   const priya = await prisma.teacher.findUniqueOrThrow({ where: { userId: priyaUser.id } });
   const meera = await prisma.teacher.findUniqueOrThrow({ where: { userId: meeraUser.id } });
+  const rohit = await prisma.teacher.findUniqueOrThrow({ where: { userId: rohitUser.id } });
   const parent = await prisma.parent.findUniqueOrThrow({ where: { userId: parentUser.id } });
+  const parent2 = await prisma.parent.findUniqueOrThrow({ where: { userId: parent2User.id } });
 
   // --- Teaching capabilities & availability --------------------------------
   const maths = await prisma.subject.findUniqueOrThrow({ where: { name: 'Mathematics' } });
@@ -226,10 +234,15 @@ async function seedDemo() {
   const science = await prisma.subject.findUniqueOrThrow({ where: { name: 'Science' } });
 
   // Ranges are level display orders: 0 = L1 … 3 = L4.
+  const telugu = await prisma.subject.findUniqueOrThrow({ where: { name: 'Telugu' } });
+
   const capabilities: Array<{ teacherId: string; subjectId: string; min: number; max: number; primary: boolean }> = [
     { teacherId: priya.id, subjectId: maths.id, min: 0, max: 3, primary: true },
     { teacherId: priya.id, subjectId: science.id, min: 0, max: 1, primary: false },
     { teacherId: meera.id, subjectId: english.id, min: 0, max: 3, primary: true },
+    // Rohit teaches Telugu but has no class: his Students list is populated
+    // purely by capability, which is the path added for the teacher flow.
+    { teacherId: rohit.id, subjectId: telugu.id, min: 0, max: 3, primary: true },
   ];
 
   for (const cap of capabilities) {
@@ -246,7 +259,7 @@ async function seedDemo() {
     });
   }
 
-  for (const teacher of [priya, meera]) {
+  for (const teacher of [priya, meera, rohit]) {
     const count = await prisma.teacherAvailability.count({ where: { teacherId: teacher.id } });
     if (count === 0) {
       await prisma.teacherAvailability.createMany({
@@ -268,10 +281,59 @@ async function seedDemo() {
     where: { subjectId_name: { subjectId: science.id, name: 'L2' } },
   });
 
-  const studentSpecs = [
-    { fullName: 'Aarav Sharma', gradeLabel: '5th Grade', linkParent: true },
-    { fullName: 'Diya Rao', gradeLabel: '5th Grade', linkParent: false },
-    { fullName: 'Kabir Singh', gradeLabel: '4th Grade', linkParent: false },
+  const teluguLevel = await prisma.level.findUniqueOrThrow({
+    where: { subjectId_name: { subjectId: telugu.id, name: 'L1' } },
+  });
+
+  /**
+   * Deliberately varied, so every branch of the student flow has a subject:
+   * a child whose parent has two children, one with no parent linked at all,
+   * and one carrying Telugu — a subject nobody has a class for yet.
+   */
+  const studentSpecs: Array<{
+    fullName: string;
+    gradeLabel: string;
+    parents: Array<{ parentId: string; relationship: string }>;
+    subjects: Array<{ subjectId: string; levelId: string }>;
+  }> = [
+    {
+      fullName: 'Aarav Sharma',
+      gradeLabel: '5th Grade',
+      parents: [{ parentId: parent.id, relationship: 'Mother' }],
+      subjects: [
+        { subjectId: maths.id, levelId: mathsLevel.id },
+        { subjectId: english.id, levelId: englishLevel.id },
+        { subjectId: science.id, levelId: scienceLevel.id },
+      ],
+    },
+    {
+      fullName: 'Diya Rao',
+      gradeLabel: '5th Grade',
+      parents: [{ parentId: parent2.id, relationship: 'Father' }],
+      subjects: [
+        { subjectId: maths.id, levelId: mathsLevel.id },
+        { subjectId: english.id, levelId: englishLevel.id },
+        // Assigned but unscheduled — surfaces under "Subjects with no teacher yet".
+        { subjectId: telugu.id, levelId: teluguLevel.id },
+      ],
+    },
+    {
+      // The sibling: same parent account as Diya, so one login covers two children.
+      fullName: 'Ishaan Rao',
+      gradeLabel: '3rd Grade',
+      parents: [{ parentId: parent2.id, relationship: 'Father' }],
+      subjects: [{ subjectId: telugu.id, levelId: teluguLevel.id }],
+    },
+    {
+      // No parent linked — the "nobody at home can see this child" warning.
+      fullName: 'Kabir Singh',
+      gradeLabel: '4th Grade',
+      parents: [],
+      subjects: [
+        { subjectId: maths.id, levelId: mathsLevel.id },
+        { subjectId: science.id, levelId: scienceLevel.id },
+      ],
+    },
   ];
 
   const students = [];
@@ -283,20 +345,16 @@ async function seedDemo() {
       });
 
       await prisma.studentSubjectLevel.createMany({
-        data: [
-          { studentId: student.id, subjectId: maths.id, levelId: mathsLevel.id },
-          { studentId: student.id, subjectId: english.id, levelId: englishLevel.id },
-          { studentId: student.id, subjectId: science.id, levelId: scienceLevel.id },
-        ],
+        data: spec.subjects.map((s) => ({ studentId: student!.id, ...s })),
       });
 
       await prisma.studentAvailability.createMany({
         data: weekWindows('09:00', '15:00').map((w) => ({ ...w, studentId: student!.id })),
       });
 
-      if (spec.linkParent) {
+      for (const link of spec.parents) {
         await prisma.parentStudent.create({
-          data: { parentId: parent.id, studentId: student.id, relationship: 'Mother' },
+          data: { parentId: link.parentId, studentId: student.id, relationship: link.relationship },
         });
       }
     }
@@ -449,6 +507,64 @@ async function seedDemo() {
     console.log('  · 1 saved class record → learning update + development evidence');
   }
 
+  // --- Class-record states: one still due, one missed for good --------------
+  //
+  // A record may be written from the class's start until 09:00 the next morning.
+  // Both sides of that deadline need to exist in the demo: one class a teacher
+  // can still write up, and one whose deadline has gone — which is what puts a
+  // count on Teacher Home and a notification in front of the admin.
+  let englishClass = await prisma.class.findFirst({
+    where: { subjectId: english.id, teacherId: meera.id, levelId: englishLevel.id },
+  });
+
+  if (!englishClass) {
+    englishClass = await prisma.class.create({
+      data: {
+        subjectId: english.id,
+        levelId: englishLevel.id,
+        teacherId: meera.id,
+        daysOfWeek: [2, 4],
+        startTime: '11:00',
+        durationMinutes: 60,
+        startDate: lastMonday,
+        timezone: env.SCHOOL_TIMEZONE,
+        createdBy: adminUser.id,
+        students: { create: students.slice(0, 2).map((s) => ({ studentId: s.id })) },
+      },
+    });
+  }
+
+  /**
+   * Both states are guaranteed on every run, not only the first.
+   *
+   * Recording a class consumes the "due" one, so a re-seed has to top it up —
+   * otherwise the second person to try the demo finds nothing to record. Each is
+   * created only when the state is genuinely absent, so re-seeding does not pile
+   * up occurrences.
+   */
+  const now = new Date();
+  const seedOccurrence = async (start: Date) => {
+    await prisma.classOccurrence.create({
+      data: {
+        classId: englishClass!.id,
+        scheduledStart: start,
+        scheduledEnd: new Date(+start + 60 * 60 * 1000),
+        teacherId: meera.id,
+      },
+    });
+  };
+
+  const englishOccurrences = await prisma.classOccurrence.findMany({
+    where: { classId: englishClass.id, scheduledStart: { lt: now } },
+    include: { classRecord: { select: { status: true } } },
+  });
+
+  const states = englishOccurrences.map((o) => recordState(o.scheduledStart, o.classRecord?.status, now));
+  if (!states.includes('OPEN')) await seedOccurrence(new Date(+now - 2 * 60 * 60 * 1000));
+  if (!states.includes('CLOSED')) await seedOccurrence(new Date(+now - 3 * 24 * 60 * 60 * 1000));
+
+  console.log('  · English class · 1 record still due, 1 already missed');
+
   // --- A teacher exception, to demonstrate grouped Needs Attention ----------
   const nextFriday = addDays(startOfWeek(new Date(), 1), 11);
   const hasException = await prisma.teacherAvailabilityException.findFirst({
@@ -494,9 +610,11 @@ async function main() {
 
   console.log(`\nDone. Sign in with any of these — password: ${DEMO_PASSWORD}\n`);
   console.log('  anjali  · Admin   · Anjali Rao');
-  console.log('  priya   · Teacher · Priya Sharma');
-  console.log('  meera   · Teacher · Meera Reddy');
-  console.log('  ananya  · Parent  · Ananya Sharma (linked to Aarav Sharma)\n');
+  console.log('  priya   · Teacher · Priya Sharma   (Maths + Science · has classes)');
+  console.log('  meera   · Teacher · Meera Reddy    (English · 1 record due, 1 missed)');
+  console.log('  rohit   · Teacher · Rohit Verma    (Telugu · students by capability, no class yet)');
+  console.log('  ananya  · Parent  · Ananya Sharma  (Aarav)');
+  console.log('  vikram  · Parent  · Vikram Rao     (Diya + Ishaan — two children)\n');
 }
 
 main()

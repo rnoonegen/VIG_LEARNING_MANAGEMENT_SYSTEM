@@ -9,7 +9,8 @@ import {
 } from '@vig/shared';
 import { handler, ok, validateBody } from '../../lib/http.js';
 import { auth, requireRole } from '../../auth/middleware.js';
-import { assertCanReadStudent, readableStudentIds } from '../../auth/guards.js';
+import { assertCanReadStudent } from '../../auth/guards.js';
+import { getStudentTeaching } from '../scheduling/service.js';
 import * as service from './service.js';
 
 export const studentsRouter = Router();
@@ -22,10 +23,7 @@ const adminOnly = requireRole('ADMIN');
  */
 studentsRouter.get(
   '/',
-  handler(async (req, res) => {
-    const scope = await readableStudentIds(auth(req));
-    return ok(res, await service.listStudents(scope));
-  }),
+  handler(async (req, res) => ok(res, await service.listStudents(auth(req)))),
 );
 
 studentsRouter.get(
@@ -44,6 +42,15 @@ studentsRouter.get(
   }),
 );
 
+/** Who teaches this child, and which of their subjects nobody is teaching yet. */
+studentsRouter.get(
+  '/:id/classes',
+  handler(async (req, res) => {
+    await assertCanReadStudent(auth(req), req.params.id);
+    return ok(res, await getStudentTeaching(req.params.id));
+  }),
+);
+
 studentsRouter.post(
   '/',
   adminOnly,
@@ -55,7 +62,7 @@ studentsRouter.patch(
   '/:id',
   adminOnly,
   validateBody(updateStudentSchema),
-  handler(async (req, res) => ok(res, await service.updateStudent(req.params.id, req.body))),
+  handler(async (req, res) => ok(res, await service.updateStudent(req.params.id, req.body, auth(req).userId))),
 );
 
 studentsRouter.put(

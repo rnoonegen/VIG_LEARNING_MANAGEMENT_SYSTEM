@@ -83,11 +83,16 @@ export function Tabs<T extends string>({
 }) {
   return (
     <div className="scroll-x mb-5 border-b border-line">
-      <div className="flex min-w-max gap-1">
+      {/* Announced as tabs, not as a row of unrelated buttons: assistive tech
+          needs the set and the current selection, which the styling alone
+          conveys only to sighted users (Design System §10). */}
+      <div className="flex min-w-max gap-1" role="tablist">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             type="button"
+            role="tab"
+            aria-selected={active === tab.key}
             onClick={() => onChange(tab.key)}
             className={cn(
               'touch-target relative whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors',

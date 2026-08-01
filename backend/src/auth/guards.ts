@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { forbidden, notFound } from '../lib/errors.js';
 import type { AuthContext } from '../types/express.js';
@@ -73,6 +74,31 @@ export async function assertCanAuthorSkill(ctx: AuthContext, skillId: string): P
   await assertCanAuthorLevel(ctx, skill.topic.levelId);
 }
 
+/**
+ * The students a teacher is responsible for by capability rather than by timetable.
+ *
+ * A capability is the admin stating "this teacher teaches this subject, over these
+ * levels" (BR-05). So a child assigned that subject, at a level inside that range,
+ * is already theirs to teach — before anyone has scheduled a class. Scoping on
+ * classes alone left a teacher looking at an empty Students list for children they
+ * had been given, which is the gap this closes.
+ */
+async function capabilityStudentWhere(teacherId: string): Promise<Prisma.StudentSubjectLevelWhereInput | null> {
+  const capabilities = await prisma.teacherCapability.findMany({
+    where: { teacherId },
+    select: { subjectId: true, minLevelOrder: true, maxLevelOrder: true },
+  });
+  if (capabilities.length === 0) return null;
+
+  return {
+    isCurrent: true,
+    OR: capabilities.map((c) => ({
+      subjectId: c.subjectId,
+      level: { displayOrder: { gte: c.minLevelOrder, lte: c.maxLevelOrder } },
+    })),
+  };
+}
+
 /** Parents may only read children linked to their parent record (BR-13). */
 export async function assertParentLinkedToStudent(
   ctx: AuthContext,
@@ -89,7 +115,10 @@ export async function assertParentLinkedToStudent(
 
 /**
  * The general "may this caller see this student?" check.
- * Admin: any. Teacher: students in a class they teach. Parent: linked children.
+ *
+ * Admin: any. Parent: linked children. Teacher: a child in one of their classes,
+ * or one assigned a subject and level they hold the capability for — the two ways
+ * a child comes to be theirs.
  */
 export async function assertCanReadStudent(ctx: AuthContext, studentId: string): Promise<void> {
   if (ctx.role === 'ADMIN') return;
@@ -100,12 +129,22 @@ export async function assertCanReadStudent(ctx: AuthContext, studentId: string):
   }
 
   if (ctx.role === 'TEACHER' && ctx.teacherId) {
-    const taught = await prisma.classStudent.findFirst({
+    const scheduled = await prisma.classStudent.findFirst({
       where: { studentId, class: { teacherId: ctx.teacherId } },
       select: { studentId: true },
     });
-    if (!taught) throw forbidden('This student is not in any of your classes.');
-    return;
+    if (scheduled) return;
+
+    const byCapability = await capabilityStudentWhere(ctx.teacherId);
+    if (byCapability) {
+      const assigned = await prisma.studentSubjectLevel.findFirst({
+        where: { ...byCapability, studentId },
+        select: { studentId: true },
+      });
+      if (assigned) return;
+    }
+
+    throw forbidden('This student is not one of yours.');
   }
 
   throw forbidden();
@@ -124,12 +163,24 @@ export async function readableStudentIds(ctx: AuthContext): Promise<string[] | '
   }
 
   if (ctx.role === 'TEACHER' && ctx.teacherId) {
-    const links = await prisma.classStudent.findMany({
-      where: { class: { teacherId: ctx.teacherId } },
-      select: { studentId: true },
-      distinct: ['studentId'],
-    });
-    return links.map((l) => l.studentId);
+    const byCapability = await capabilityStudentWhere(ctx.teacherId);
+
+    const [scheduled, assigned] = await Promise.all([
+      prisma.classStudent.findMany({
+        where: { class: { teacherId: ctx.teacherId } },
+        select: { studentId: true },
+        distinct: ['studentId'],
+      }),
+      byCapability
+        ? prisma.studentSubjectLevel.findMany({
+            where: byCapability,
+            select: { studentId: true },
+            distinct: ['studentId'],
+          })
+        : Promise.resolve([]),
+    ]);
+
+    return [...new Set([...scheduled, ...assigned].map((r) => r.studentId))];
   }
 
   return [];

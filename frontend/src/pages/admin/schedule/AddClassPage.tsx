@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CalendarCheck, Check, Sparkles } from 'lucide-react';
+import { AlertCircle, CalendarCheck, Check, Sparkles } from 'lucide-react';
 import type { SlotOptionDto, StudentSummaryDto, SubjectDto, TeacherSummaryDto } from '@vig/shared';
 import { formatTime12h, WEEKDAY_SHORT } from '@vig/shared';
 import { errorMessage, get, post } from '@/lib/api';
@@ -28,6 +28,7 @@ export function AddClassPage() {
   const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>('request');
   const [options, setOptions] = useState<Option[]>([]);
+  const [reasons, setReasons] = useState<string[]>([]);
   const [selected, setSelected] = useState<Option | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,10 +61,10 @@ export function AddClassPage() {
 
   const findOptions = useMutation({
     mutationFn: () =>
-      post<{ options: Option[] }>('/schedule/options', {
+      post<{ options: Option[]; reasons: string[] }>('/schedule/options', {
         studentIds,
         subjectId,
-        levelId,
+        levelId: levelId || suggestedLevelId,
         teacherId: teacherId || undefined,
         timesPerWeek,
         durationMinutes,
@@ -72,6 +73,7 @@ export function AddClassPage() {
       }),
     onSuccess: (result) => {
       setOptions(result.options);
+      setReasons(result.reasons ?? []);
       setSelected(result.options.find((o) => o.isBestMatch) ?? result.options[0] ?? null);
       setStage('options');
       setError(null);
@@ -101,6 +103,32 @@ export function AddClassPage() {
     const student = students?.find((s) => s.id === studentIds[0]);
     return student?.subjectLevels.find((sl) => sl.subjectId === subjectId)?.levelId ?? '';
   }, [subjectId, studentIds, students]);
+
+  /**
+   * Capability is the first thing the engine checks and the one an admin cannot
+   * see from here: a teacher assigned only Maths silently produces "no valid
+   * times" for science. So the picker offers only teachers who can take this
+   * subject at this level.
+   */
+  const capableTeachers = useMemo(() => {
+    const active = teachers?.filter((t) => t.status === 'ACTIVE') ?? [];
+    const chosenLevel = subject?.levels?.find((l) => l.id === (levelId || suggestedLevelId));
+    if (!subjectId || !chosenLevel) return active;
+
+    return active.filter((t) =>
+      t.subjects.some(
+        (s) =>
+          s.subjectId === subjectId &&
+          chosenLevel.displayOrder >= s.minLevelOrder &&
+          chosenLevel.displayOrder <= s.maxLevelOrder,
+      ),
+    );
+  }, [teachers, subject, subjectId, levelId, suggestedLevelId]);
+
+  // A teacher chosen before the subject changed may no longer be capable.
+  useEffect(() => {
+    if (teacherId && !capableTeachers.some((t) => t.id === teacherId)) setTeacherId('');
+  }, [capableTeachers, teacherId]);
 
   const canSearch = studentIds.length > 0 && subjectId && (levelId || suggestedLevelId);
 
@@ -208,11 +236,25 @@ export function AddClassPage() {
               </Select>
             </Field>
 
-            <Field label="Teacher" hint="Leave blank to let VIG suggest any capable teacher.">
+            <Field
+              label="Teacher"
+              hint={
+                subjectId && capableTeachers.length === 0
+                  ? undefined
+                  : 'Leave blank to let VIG suggest any capable teacher.'
+              }
+              error={
+                subjectId && capableTeachers.length === 0
+                  ? 'No teacher is assigned to this subject and level yet. Add it under Teachers → Teaching.'
+                  : null
+              }
+            >
               <Select value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>
                 <option value="">Any capable teacher</option>
-                {/* Deactivated teachers cannot take a class, so they are not offered one. */}
-                {teachers?.filter((t) => t.status === 'ACTIVE').map((t) => (
+                {/* Only teachers who can actually take this subject and level, so
+                    the form cannot ask for something the engine must reject.
+                    Deactivated teachers are never offered a class. */}
+                {capableTeachers.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.fullName}
                   </option>
@@ -278,10 +320,28 @@ export function AddClassPage() {
         findOptions.isPending ? (
           <LoadingState rows={3} label="Checking availability" />
         ) : options.length === 0 ? (
-          <EmptyState
-            title="No valid times found"
-            description="No slot satisfies the teacher's capability, both availabilities and the existing schedule. Try a different duration, fewer times per week, or widen availability."
-          />
+          /* An empty result names the constraint that ruled everything out — the
+             fix differs completely depending on which one it was. */
+          <Card tone="warning">
+            <CardHeader
+              title="No valid times found"
+              description="Nothing satisfies every constraint. Here is what stopped it:"
+            />
+            {reasons.length === 0 ? (
+              <p className="text-sm text-ink-2">
+                No slot satisfies teaching capability, both availabilities and the existing schedule.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {reasons.map((reason) => (
+                  <li key={reason} className="flex gap-2 text-sm text-ink">
+                    <AlertCircle size={15} className="mt-0.5 shrink-0 text-warning" />
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         ) : (
           <Card>
             <CardHeader
