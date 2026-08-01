@@ -18,6 +18,29 @@ const server = app.listen(env.PORT, () => {
 });
 
 /**
+ * A listen failure is a setup problem, not a crash worth a stack trace.
+ *
+ * The common one by far is starting a second copy while the first is still
+ * running — `tsx watch` in another terminal, or a server left behind by a
+ * previous session. Node's default is an unhandled 'error' event and forty
+ * lines of internals; this says what happened and how to clear it.
+ */
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `\n[api] Port ${env.PORT} is already in use — the API is probably already running.\n\n` +
+        '      Find and stop it:\n' +
+        `        Windows    netstat -ano | findstr :${env.PORT}   then  taskkill /PID <pid> /F\n` +
+        `        macOS/Linux  lsof -ti:${env.PORT} | xargs kill\n\n` +
+        `      Or start this one somewhere else:  PORT=4001 npm run dev\n`,
+    );
+  } else {
+    console.error(`\n[api] Could not start the server: ${err.message}\n`);
+  }
+  process.exit(1);
+});
+
+/**
  * Occurrences are materialised over a rolling horizon (AD-05). Extending on boot
  * plus once a day keeps the schedule grid populated without a separate worker
  * process, which is the right trade at this scale.
