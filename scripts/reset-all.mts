@@ -2,8 +2,9 @@
 /**
  * Empties the school.
  *
- *   npm run data:reset -- --dry    show what would go, delete nothing
- *   npm run data:reset -- --yes    do it
+ *   npm run data:reset -- --dry           show what would go, delete nothing
+ *   npm run data:reset -- --yes           do it, keeping admins + curriculum
+ *   npm run data:reset -- --everything --yes   leave nothing behind
  *
  * Everything a school accumulates is removed: students, parents, teachers, their
  * sign-in accounts, every class and class record, all learning and development
@@ -18,8 +19,12 @@
  *   stays   admin accounts, school settings, the development-area catalogue, and
  *           the curriculum (subjects → levels → headings → sub-headings)
  *
- * Admin accounts are kept so the app is still reachable afterwards. To remove
- * those too, delete them from the Accounts page once you have another way in.
+ * Admin accounts are kept by default so the app is still reachable afterwards.
+ *
+ * `--everything` additionally removes the curriculum, the development-area
+ * catalogue and the admin accounts — a bare database. Nobody can sign in after
+ * that: run `npm run admin:create` to make a way back in, then `npm run db:seed`
+ * if you want the demo data again.
  *
  * There is no undo. Take a database backup first.
  */
@@ -35,6 +40,8 @@ config({ path: path.join(ROOT, '.env') });
 
 const DRY = process.argv.includes('--dry');
 const CONFIRMED = process.argv.includes('--yes');
+/** Take the curriculum and the admin accounts too — nothing survives. */
+const EVERYTHING = process.argv.includes('--everything');
 
 const prisma = new PrismaClient();
 
@@ -67,6 +74,9 @@ async function counts() {
     weeklyUpdates,
     notifications,
     auditEntries,
+    subjects,
+    skills,
+    developmentAreas,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { role: 'ADMIN' } }),
@@ -82,6 +92,9 @@ async function counts() {
     prisma.weeklyUpdate.count(),
     prisma.notification.count(),
     prisma.auditLog.count(),
+    prisma.subject.count(),
+    prisma.skill.count(),
+    prisma.developmentArea.count(),
   ]);
 
   return {
@@ -99,6 +112,9 @@ async function counts() {
     weeklyUpdates,
     notifications,
     auditEntries,
+    subjects,
+    skills,
+    developmentAreas,
   };
 }
 
@@ -131,7 +147,14 @@ for (const bucket of BUCKETS) {
   console.log(`  ${`storage:${bucket}`.padEnd(18)} ${objectsByBucket[bucket]!.length}`);
 }
 
-console.log(`\n  ${before.admins} admin account(s) will be kept.\n`);
+console.log(
+  EVERYTHING
+    ? `\n  --everything: the curriculum (${before.subjects} subjects, ${before.skills} sub-headings),\n` +
+        `  ${before.developmentAreas} development areas and all ${before.admins} admin account(s) go too.\n` +
+        `  Nobody will be able to sign in afterwards — run \`npm run admin:create\` to get back in.\n`
+    : `\n  ${before.admins} admin account(s), the curriculum and the development areas will be kept.\n` +
+        `  Add --everything to remove those as well.\n`,
+);
 
 if (DRY || !CONFIRMED) {
   console.log(DRY ? 'Dry run — nothing deleted.\n' : 'Refusing to delete without --yes.\n');
@@ -141,10 +164,13 @@ if (DRY || !CONFIRMED) {
 
 // --- The database ------------------------------------------------------------
 
-const keptAdmins = await prisma.user.findMany({
-  where: { role: 'ADMIN' },
-  select: { id: true, username: true, emailAlias: true },
-});
+// With --everything there is nobody to keep, so the same code path clears the lot.
+const keptAdmins = EVERYTHING
+  ? []
+  : await prisma.user.findMany({
+      where: { role: 'ADMIN' },
+      select: { id: true, username: true, emailAlias: true },
+    });
 const keptIds = new Set(keptAdmins.map((a) => a.id));
 
 await prisma.$transaction(async (tx) => {
@@ -191,6 +217,16 @@ await prisma.$transaction(async (tx) => {
   // Teacher and parent rows cascade from their user, which goes last.
   await tx.pushSubscription.deleteMany({ where: { userId: { notIn: [...keptIds] } } });
   await tx.user.deleteMany({ where: { id: { notIn: [...keptIds] } } });
+
+  if (EVERYTHING) {
+    // Curriculum last, and innermost first: everything that pointed at a skill,
+    // level or subject — progress, classes, capabilities — is already gone above.
+    await tx.skill.deleteMany({});
+    await tx.topic.deleteMany({});
+    await tx.level.deleteMany({});
+    await tx.subject.deleteMany({});
+    await tx.developmentArea.deleteMany({});
+  }
 });
 
 console.log('Database cleared.');
@@ -247,4 +283,11 @@ for (const [key, value] of Object.entries(after)) {
 }
 
 await prisma.$disconnect();
-console.log(`\nReset complete. Sign in as: ${keptAdmins.map((a) => a.username).join(', ')}\n`);
+
+console.log(
+  keptAdmins.length
+    ? `\nReset complete. Sign in as: ${keptAdmins.map((a) => a.username).join(', ')}\n`
+    : '\nReset complete. The database is bare — no accounts, no curriculum.\n' +
+        '  npm run admin:create   make an administrator so you can sign in\n' +
+        '  npm run db:seed        or put the demo school back instead\n',
+);
