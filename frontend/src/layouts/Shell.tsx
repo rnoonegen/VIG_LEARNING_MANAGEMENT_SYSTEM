@@ -6,6 +6,7 @@ import {
   Calendar,
   GraduationCap,
   Heart,
+  HeartHandshake,
   Home,
   Image,
   LogOut,
@@ -34,6 +35,7 @@ export const ADMIN_NAV: NavItem[] = [
   { to: '/admin', label: 'Home', icon: <Home size={ICON_SIZE} />, end: true },
   { to: '/admin/schedule', label: 'Schedule', icon: <Calendar size={ICON_SIZE} /> },
   { to: '/admin/students', label: 'Students', icon: <Users size={ICON_SIZE} /> },
+  { to: '/admin/parents', label: 'Parents', icon: <HeartHandshake size={ICON_SIZE} /> },
   { to: '/admin/curriculum', label: 'Curriculum', icon: <BookOpen size={ICON_SIZE} /> },
   { to: '/admin/teachers', label: 'Teachers', icon: <GraduationCap size={ICON_SIZE} /> },
 ];

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Plus, Settings2, UserPlus } from 'lucide-react';
+import { Settings2, UserPlus } from 'lucide-react';
 import type {
   JoinableClassDto,
   StudentDto,
@@ -9,7 +9,7 @@ import type {
   StudentTeachingDto,
   SubjectDto,
 } from '@vig/shared';
-import { formatShortDate, formatTime12h, SCHOOL_TIMEZONE, WEEKDAY_SHORT } from '@vig/shared';
+import { formatShortDate, formatTime12h, SCHOOL_TIMEZONE, splitName, WEEKDAY_SHORT } from '@vig/shared';
 import { del, errorMessage, get, patch, post, put } from '@/lib/api';
 import { Avatar, DetailRow, PageHeader, Section, Tabs } from '@/components/ui/Layout';
 import { Button, ButtonLink } from '@/components/ui/Button';
@@ -17,18 +17,14 @@ import { Card, CardHeader } from '@/components/ui/Card';
 import { ErrorState, LoadingState } from '@/components/ui/States';
 import { Modal } from '@/components/ui/Modal';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
-import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import { Field, Input, Textarea } from '@/components/ui/Field';
 import { LearningMap } from '@/components/LearningMap';
 import { DevelopmentPanel } from '@/components/DevelopmentPanel';
 import { MomentsGrid } from '@/components/MomentsGrid';
 import { AvailabilityGrid, fromDayRows, toDayRows, type DayAvailability } from '@/components/AvailabilityGrid';
 import { SubjectLevelEditor, type SubjectLevelDraft } from '@/components/SubjectLevelEditor';
-import { TempPasswordModal } from '../admin/teachers/TeachersPage';
 
 type Tab = 'overview' | 'classes' | 'learning' | 'development' | 'moments' | 'history';
-
-/** Credentials are returned once, by whichever action created or reset them. */
-type Credentials = { username: string; tempPassword: string };
 
 /**
  * The long-term record for one child.
@@ -40,7 +36,6 @@ export function StudentProfilePage({ basePath, canManage }: { basePath: string; 
   const { studentId = '' } = useParams();
   const [tab, setTab] = useState<Tab>('overview');
   const [managing, setManaging] = useState(false);
-  const [credentials, setCredentials] = useState<Credentials | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['students', studentId],
@@ -69,6 +64,7 @@ export function StudentProfilePage({ basePath, canManage }: { basePath: string; 
         <Avatar name={data.fullName} url={data.avatarUrl} size={56} />
         <div className="min-w-0">
           <p className="text-sm font-medium text-ink">{data.fullName}</p>
+          {data.username ? <p className="font-mono text-xs text-ink-2">{data.username}</p> : null}
           <p className="text-xs text-ink-2">
             {[data.gradeLabel, data.dateOfBirth ? `Born ${formatShortDate(new Date(data.dateOfBirth))}` : null]
               .filter(Boolean)
@@ -101,21 +97,7 @@ export function StudentProfilePage({ basePath, canManage }: { basePath: string; 
       {tab === 'moments' ? <MomentsGrid endpoint={`/students/${studentId}/moments`} /> : null}
       {tab === 'history' ? <History studentId={studentId} /> : null}
 
-      {managing ? (
-        <ManageStudentModal
-          student={data}
-          onClose={() => setManaging(false)}
-          onCredentials={setCredentials}
-        />
-      ) : null}
-
-      {credentials ? (
-        <TempPasswordModal
-          created={credentials}
-          title="Parent account"
-          onClose={() => setCredentials(null)}
-        />
-      ) : null}
+      {managing ? <ManageStudentModal student={data} onClose={() => setManaging(false)} /> : null}
     </div>
   );
 }
@@ -488,15 +470,7 @@ type ManageTab = 'details' | 'subjects' | 'availability' | 'parent' | 'status';
  * unrelated decisions, and an admin adding a subject should not have to think
  * about what else the form might be about to write.
  */
-function ManageStudentModal({
-  student,
-  onClose,
-  onCredentials,
-}: {
-  student: StudentDto;
-  onClose: () => void;
-  onCredentials: (credentials: Credentials) => void;
-}) {
+function ManageStudentModal({ student, onClose }: { student: StudentDto; onClose: () => void }) {
   const [tab, setTab] = useState<ManageTab>('details');
 
   return (
@@ -527,7 +501,7 @@ function ManageStudentModal({
       {tab === 'details' ? <DetailsPanel student={student} /> : null}
       {tab === 'subjects' ? <SubjectsPanel student={student} /> : null}
       {tab === 'availability' ? <AvailabilityPanel student={student} /> : null}
-      {tab === 'parent' ? <ParentPanel student={student} onCredentials={onCredentials} /> : null}
+      {tab === 'parent' ? <ParentPanel student={student} /> : null}
       {tab === 'status' ? <StatusPanel student={student} /> : null}
     </Modal>
   );
@@ -570,7 +544,11 @@ function SaveRow({
 
 function DetailsPanel({ student }: { student: StudentDto }) {
   const refresh = useStudentRefresh(student.id);
-  const [fullName, setFullName] = useState(student.fullName);
+  // Children enrolled before the name was collected in two fields still edit
+  // cleanly: the stored full name is split to seed the form.
+  const existing = splitName(student.fullName);
+  const [firstName, setFirstName] = useState(student.firstName ?? existing.firstName);
+  const [lastName, setLastName] = useState(student.lastName ?? existing.lastName);
   const [dateOfBirth, setDateOfBirth] = useState(student.dateOfBirth ?? '');
   const [gradeLabel, setGradeLabel] = useState(student.gradeLabel ?? '');
   const [notes, setNotes] = useState(student.notes ?? '');
@@ -580,7 +558,8 @@ function DetailsPanel({ student }: { student: StudentDto }) {
   const save = useMutation({
     mutationFn: () =>
       patch(`/students/${student.id}`, {
-        fullName: fullName.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         // An emptied optional field is a deliberate clear, so it is sent as null
         // rather than dropped from the payload.
         dateOfBirth: dateOfBirth || null,
@@ -600,17 +579,40 @@ function DetailsPanel({ student }: { student: StudentDto }) {
       <CardHeader title="Basic details" description="Their name, date of birth and grade." />
 
       <div className="flex flex-col gap-4">
-        <Field label="Full name" htmlFor="student-edit-name" required>
-          <Input
-            id="student-edit-name"
-            value={fullName}
-            onChange={(e) => {
-              setFullName(e.target.value);
-              setSaved(false);
-            }}
-            autoFocus
-          />
-        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="First name" htmlFor="student-edit-first-name" required>
+            <Input
+              id="student-edit-first-name"
+              value={firstName}
+              onChange={(e) => {
+                setFirstName(e.target.value);
+                setSaved(false);
+              }}
+              autoFocus
+            />
+          </Field>
+
+          <Field label="Last name" htmlFor="student-edit-last-name" required>
+            <Input
+              id="student-edit-last-name"
+              value={lastName}
+              onChange={(e) => {
+                setLastName(e.target.value);
+                setSaved(false);
+              }}
+            />
+          </Field>
+        </div>
+
+        {student.username ? (
+          <Field
+            label="Roll name"
+            htmlFor="student-edit-username"
+            hint="Issued by VIG when the child was enrolled. It does not change with their name."
+          >
+            <Input id="student-edit-username" value={student.username} readOnly className="font-mono" />
+          </Field>
+        ) : null}
 
         <Field label="Date of birth" htmlFor="student-edit-dob">
           <Input
@@ -653,7 +655,7 @@ function DetailsPanel({ student }: { student: StudentDto }) {
         onSave={() => save.mutate()}
         pending={save.isPending}
         saved={saved}
-        disabled={!fullName.trim()}
+        disabled={!firstName.trim() || !lastName.trim()}
         error={error}
       />
     </>
@@ -774,80 +776,14 @@ function AvailabilityPanel({ student }: { student: StudentDto }) {
   );
 }
 
-interface AccountRow {
-  id: string;
-  username: string;
-  fullName: string;
-  role: 'ADMIN' | 'TEACHER' | 'PARENT';
-  status: string;
-}
-
 /**
- * Parent access.
+ * Parent access — who can see this child, and nothing more.
  *
- * A parent account is created here with its credentials, or an existing one is
- * linked — a second child of the same family reuses the account rather than
- * getting a duplicate login (Q8). Passwords are shown once and never retrievable
- * (AD-09), so resetting is the only recovery.
+ * Accounts are created and maintained on the Parents page, which is where the
+ * contact details, the photograph and the sibling links live. This tab reports
+ * the answer rather than offering a second, thinner way to change it.
  */
-function ParentPanel({
-  student,
-  onCredentials,
-}: {
-  student: StudentDto;
-  onCredentials: (credentials: Credentials) => void;
-}) {
-  const refresh = useStudentRefresh(student.id);
-  const [mode, setMode] = useState<'create' | 'link'>('create');
-  const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
-  const [parentUserId, setParentUserId] = useState('');
-  const [relationship, setRelationship] = useState('Parent');
-  const [error, setError] = useState<string | null>(null);
-
-  const { data: accounts } = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => get<AccountRow[]>('/admin/users'),
-  });
-
-  const linkedUserIds = student.parents.map((p) => p.userId);
-  const availableParents = (accounts ?? []).filter(
-    (a) => a.role === 'PARENT' && a.status === 'ACTIVE' && !linkedUserIds.includes(a.id),
-  );
-
-  const link = useMutation({
-    mutationFn: () =>
-      put<{ parentTempPassword: string | null }>(`/students/${student.id}/parent-access`, {
-        relationship,
-        ...(mode === 'create'
-          ? { fullName: fullName.trim(), username: username.trim() }
-          : { parentUserId }),
-      }),
-    onSuccess: async (result) => {
-      await refresh();
-      setError(null);
-      setFullName('');
-      setUsername('');
-      setParentUserId('');
-      if (result.parentTempPassword) {
-        onCredentials({ username: username.trim(), tempPassword: result.parentTempPassword });
-      }
-    },
-    onError: (err) => setError(errorMessage(err)),
-  });
-
-  const reset = useMutation({
-    mutationFn: (userId: string) => post<Credentials>(`/admin/users/${userId}/reset-password`),
-    onSuccess: (result) => {
-      setError(null);
-      onCredentials(result);
-    },
-    onError: (err) => setError(errorMessage(err)),
-  });
-
-  const canSubmit =
-    mode === 'create' ? Boolean(fullName.trim() && username.trim()) : Boolean(parentUserId);
-
+function ParentPanel({ student }: { student: StudentDto }) {
   return (
     <>
       <CardHeader
@@ -856,137 +792,30 @@ function ParentPanel({
       />
 
       {student.parents.length > 0 ? (
-        <ul className="mb-5 flex flex-col gap-2">
+        <ul className="flex flex-col gap-2">
           {student.parents.map((p) => (
-            <li
-              key={p.parentId}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-line px-3 py-2.5"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-ink">{p.fullName}</p>
-                <p className="text-xs text-ink-2">
-                  @{p.username}
-                  {p.relationship ? ` · ${p.relationship}` : ''}
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<KeyRound size={13} />}
-                onClick={() => reset.mutate(p.userId)}
-                disabled={reset.isPending}
-              >
-                Reset password
-              </Button>
+            <li key={p.parentId} className="rounded-[12px] border border-line px-3 py-2.5">
+              <p className="text-sm font-medium text-ink">{p.fullName}</p>
+              <p className="text-xs text-ink-2">
+                <span className="font-mono">{p.username}</span>
+                {p.relationship ? ` · ${p.relationship}` : ''}
+              </p>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mb-5 rounded-[12px] bg-warning-bg px-3 py-2.5 text-xs text-ink-2">
+        <p className="rounded-[12px] bg-warning-bg px-3 py-2.5 text-xs text-ink-2">
           No parent account yet. Until one exists, nobody at home can see this child's updates.
         </p>
       )}
 
-      <div className="rounded-[12px] border border-line p-3">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-violet">Add a parent</p>
-
-        <div className="mb-4 flex gap-2">
-          {(['create', 'link'] as const).map((option) => (
-            <Button
-              key={option}
-              size="sm"
-              variant={mode === option ? 'primary' : 'secondary'}
-              onClick={() => {
-                setMode(option);
-                setError(null);
-              }}
-            >
-              {option === 'create' ? 'New account' : 'Existing account'}
-            </Button>
-          ))}
-        </div>
-
-        <div className="flex flex-col gap-4">
-          {mode === 'create' ? (
-            <>
-              <Field label="Parent full name" htmlFor="add-parent-name" required>
-                <Input
-                  id="add-parent-name"
-                  value={fullName}
-                  onChange={(e) => {
-                    setFullName(e.target.value);
-                    if (!username) {
-                      setUsername(e.target.value.trim().toLowerCase().split(' ')[0] ?? '');
-                    }
-                  }}
-                  placeholder="Ananya Sharma"
-                />
-              </Field>
-
-              <Field
-                label="Username"
-                htmlFor="add-parent-username"
-                required
-                hint="They receive a temporary password, shown once, to pass on directly."
-              >
-                <Input
-                  id="add-parent-username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                  placeholder="ananya"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                />
-              </Field>
-            </>
-          ) : (
-            <Field
-              label="Parent account"
-              htmlFor="add-parent-existing"
-              required
-              hint="Use this for a sibling, so one login covers both children."
-            >
-              <Select
-                id="add-parent-existing"
-                value={parentUserId}
-                onChange={(e) => setParentUserId(e.target.value)}
-              >
-                <option value="">Select…</option>
-                {availableParents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.fullName} (@{a.username})
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-
-          <Field label="Relationship" htmlFor="add-parent-relationship">
-            <Select
-              id="add-parent-relationship"
-              value={relationship}
-              onChange={(e) => setRelationship(e.target.value)}
-            >
-              <option>Parent</option>
-              <option>Mother</option>
-              <option>Father</option>
-              <option>Guardian</option>
-            </Select>
-          </Field>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            icon={<Plus size={14} />}
-            onClick={() => link.mutate()}
-            disabled={!canSubmit || link.isPending}
-          >
-            {link.isPending ? 'Saving…' : mode === 'create' ? 'Create & Link' : 'Link Parent'}
-          </Button>
-          {error ? <span className="text-xs text-danger">{error}</span> : null}
-        </div>
-      </div>
+      <p className="mt-4 text-xs text-ink-2">
+        Parent accounts are added and managed from{' '}
+        <Link to="/admin/parents" className="font-medium text-violet underline">
+          Parents
+        </Link>
+        .
+      </p>
     </>
   );
 }

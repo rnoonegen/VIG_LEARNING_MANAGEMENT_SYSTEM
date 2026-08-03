@@ -19,6 +19,7 @@ import { learningRouter } from './modules/learning/routes.js';
 import { developmentAreasRouter, studentDevelopmentRouter } from './modules/development/routes.js';
 import { momentsRouter, studentMomentsRouter } from './modules/moments/routes.js';
 import { parentRouter } from './modules/parent/routes.js';
+import { parentsRouter } from './modules/parents/routes.js';
 import { weeklyRouter } from './modules/weekly/routes.js';
 import { notificationsRouter } from './modules/notifications/routes.js';
 import { opsRouter } from './modules/ops/routes.js';
@@ -82,6 +83,8 @@ export function createApp() {
   api.use('/development', developmentAreasRouter);
   api.use('/moments', momentsRouter);
   api.use('/parent', parentRouter);
+  // Admin-facing parent administration; /parent above is the parent's own API.
+  api.use('/parents', parentsRouter);
   api.use('/weekly-updates', weeklyRouter);
   api.use('/notifications', notificationsRouter);
   api.use('/admin', opsRouter);

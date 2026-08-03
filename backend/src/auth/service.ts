@@ -18,6 +18,16 @@ function generateTempPassword(): string {
   return `Vig-${body}`;
 }
 
+/**
+ * Usernames are issued by the school with meaningful case (P26NagVen), so the
+ * stored value keeps it and every comparison ignores it. A case-insensitive
+ * unique index on users(lower(username)) backs this up in the database
+ * (016_names_and_contacts.sql).
+ */
+function byUsername(username: string) {
+  return { username: { equals: username, mode: 'insensitive' as const } };
+}
+
 export async function toSessionUser(userId: string): Promise<SessionUser> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -57,8 +67,8 @@ export async function toSessionUser(userId: string): Promise<SessionUser> {
 export async function login(username: string, password: string) {
   const genericFailure = unauthorized('Username or password is incorrect.');
 
-  const user = await prisma.user.findUnique({
-    where: { username: username.toLowerCase() },
+  const user = await prisma.user.findFirst({
+    where: byUsername(username),
     select: { id: true, emailAlias: true, status: true },
   });
   if (!user) throw genericFailure;
@@ -110,18 +120,17 @@ interface CreateUserArgs {
  * against Supabase and still read role and status from our own database.
  */
 export async function createUser({ username, fullName, role, actorId }: CreateUserArgs) {
-  const normalized = username.toLowerCase();
-  const existing = await prisma.user.findUnique({ where: { username: normalized } });
+  const existing = await prisma.user.findFirst({ where: byUsername(username) });
   if (existing) throw conflict('That username is already taken.');
 
-  const emailAlias = usernameToEmail(normalized);
+  const emailAlias = usernameToEmail(username);
   const tempPassword = generateTempPassword();
 
   const { data, error } = await supabaseAdmin().auth.admin.createUser({
     email: emailAlias,
     password: tempPassword,
     email_confirm: true,
-    user_metadata: { username: normalized, full_name: fullName },
+    user_metadata: { username, full_name: fullName },
   });
   if (error || !data.user) {
     throw new AppError(502, 'AUTH_ERROR', `Could not create the account: ${error?.message ?? 'unknown'}`);
@@ -132,7 +141,7 @@ export async function createUser({ username, fullName, role, actorId }: CreateUs
       const created = await tx.user.create({
         data: {
           id: data.user!.id,
-          username: normalized,
+          username,
           emailAlias,
           role,
           fullName,
@@ -149,7 +158,7 @@ export async function createUser({ username, fullName, role, actorId }: CreateUs
       action: 'USER_CREATED',
       entity: 'User',
       entityId: user.id,
-      after: { username: normalized, role },
+      after: { username, role },
     });
 
     return { user, tempPassword };
@@ -166,8 +175,8 @@ export async function createUser({ username, fullName, role, actorId }: CreateUs
  * every active admin gets a notification and the request surfaces in Needs Attention.
  */
 export async function requestPasswordReset(username: string): Promise<void> {
-  const user = await prisma.user.findUnique({
-    where: { username: username.toLowerCase() },
+  const user = await prisma.user.findFirst({
+    where: byUsername(username),
     select: { id: true, username: true, fullName: true, status: true },
   });
   if (!user || user.status !== 'ACTIVE') return;
@@ -220,23 +229,26 @@ export async function resetPassword(targetUserId: string, actorId: string) {
  * Auth email alias (AD-02), so both sides move together or neither does.
  */
 export async function renameUser(targetUserId: string, username: string, actorId: string): Promise<void> {
-  const normalized = username.toLowerCase();
-
   const user = await prisma.user.findUnique({
     where: { id: targetUserId },
     select: { username: true, fullName: true },
   });
   if (!user) throw notFound('User');
-  if (user.username === normalized) return;
+  if (user.username === username) return;
 
-  const taken = await prisma.user.findUnique({ where: { username: normalized }, select: { id: true } });
+  // Case-insensitive, so a rename that only changes capitalisation is allowed
+  // through while a genuine clash with someone else is still refused.
+  const taken = await prisma.user.findFirst({
+    where: { ...byUsername(username), NOT: { id: targetUserId } },
+    select: { id: true },
+  });
   if (taken) throw conflict('That username is already taken.');
 
-  const emailAlias = usernameToEmail(normalized);
+  const emailAlias = usernameToEmail(username);
   const { error } = await supabaseAdmin().auth.admin.updateUserById(targetUserId, {
     email: emailAlias,
     email_confirm: true,
-    user_metadata: { username: normalized, full_name: user.fullName },
+    user_metadata: { username, full_name: user.fullName },
   });
   if (error) {
     throw new AppError(502, 'AUTH_ERROR', `Could not update the sign-in name: ${error.message}`);
@@ -244,7 +256,7 @@ export async function renameUser(targetUserId: string, username: string, actorId
 
   await prisma.user.update({
     where: { id: targetUserId },
-    data: { username: normalized, emailAlias },
+    data: { username, emailAlias },
   });
 
   await audit({
@@ -253,7 +265,7 @@ export async function renameUser(targetUserId: string, username: string, actorId
     entity: 'User',
     entityId: targetUserId,
     before: { username: user.username },
-    after: { username: normalized },
+    after: { username },
   });
 }
 

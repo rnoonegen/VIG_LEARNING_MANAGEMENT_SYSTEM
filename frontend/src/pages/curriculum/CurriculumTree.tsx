@@ -444,7 +444,7 @@ function AddSubjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
       open
       onClose={onClose}
       title="Add subject"
-      description="It arrives with four levels — L1 to L4 — which you can rename."
+      description="It arrives with four levels — Valmiki, Vasishta, Vishwamitra, Vishwakarma — which you can rename."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

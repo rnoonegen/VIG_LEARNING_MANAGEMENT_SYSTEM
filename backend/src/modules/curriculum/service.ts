@@ -24,7 +24,7 @@ const ACTIVE = { status: { not: 'ARCHIVED' as const } };
  * numbered so a school can call them what it likes, but there are four, and the
  * admin renames rather than invents them.
  */
-export const DEFAULT_LEVEL_NAMES = ['L1', 'L2', 'L3', 'L4'] as const;
+export const DEFAULT_LEVEL_NAMES = ['Valmiki', 'Vasishta', 'Vishwamitra', 'Vishwakarma'] as const;
 
 export async function listSubjects(includeArchived = false): Promise<SubjectDto[]> {
   const subjects = await prisma.subject.findMany({

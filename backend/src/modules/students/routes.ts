@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import {
+  avatarUploadUrlSchema,
   createStudentSchema,
   putAvailabilitySchema,
   putParentAccessSchema,
   putSubjectLevelsSchema,
+  setAvatarSchema,
   updateStudentSchema,
   updateStudentStatusSchema,
 } from '@vig/shared';
@@ -51,11 +53,42 @@ studentsRouter.get(
   }),
 );
 
+/**
+ * Profile photo. The browser uploads to the signed URL directly and posts back
+ * only the path; the bucket stays private and every read is a signed URL.
+ *
+ * Declared before POST '/' so a photo can be attached while enrolling, before
+ * the child has an id.
+ */
+studentsRouter.post(
+  '/avatar-upload-url',
+  adminOnly,
+  validateBody(avatarUploadUrlSchema),
+  handler(async (req, res) =>
+    ok(res, await service.createAvatarUploadUrl(req.body.fileName, req.body.mimeType)),
+  ),
+);
+
 studentsRouter.post(
   '/',
   adminOnly,
   validateBody(createStudentSchema),
   handler(async (req, res) => ok(res, await service.createStudent(req.body, auth(req).userId), undefined, 201)),
+);
+
+studentsRouter.put(
+  '/:id/avatar',
+  adminOnly,
+  validateBody(setAvatarSchema),
+  handler(async (req, res) =>
+    ok(res, await service.setAvatar(req.params.id, req.body.storagePath, auth(req).userId)),
+  ),
+);
+
+studentsRouter.delete(
+  '/:id/avatar',
+  adminOnly,
+  handler(async (req, res) => ok(res, await service.removeAvatar(req.params.id, auth(req).userId))),
 );
 
 studentsRouter.patch(

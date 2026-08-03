@@ -254,6 +254,14 @@ export interface StudentSubjectLevelDto {
 export interface StudentSummaryDto {
   id: string;
   fullName: string;
+  /** Null on children enrolled before names were collected in two fields. */
+  firstName: string | null;
+  lastName: string | null;
+  /**
+   * The school-issued roll name (S26AarSha). It identifies the child on
+   * paperwork; children do not sign in, so it is not a login.
+   */
+  username: string | null;
   gradeLabel: string | null;
   status: StudentStatus;
   avatarUrl: string | null;
@@ -554,6 +562,54 @@ export interface MomentDto {
 }
 
 // --- Parent -----------------------------------------------------------------
+
+/**
+ * A parent as the admin manages them: the account, the contact number, and the
+ * children it grants sight of.
+ */
+export interface ParentSummaryDto {
+  id: string;
+  userId: string;
+  fullName: string;
+  firstName: string | null;
+  lastName: string | null;
+  username: string;
+  mobileNumber: string | null;
+  status: UserStatus;
+  avatarUrl: string | null;
+  children: Array<{
+    id: string;
+    fullName: string;
+    avatarUrl: string | null;
+    relationship: string | null;
+  }>;
+}
+
+export interface ParentDto extends ParentSummaryDto {
+  mustChangePassword: boolean;
+  createdAt: string;
+}
+
+/** Returned once, to the admin who created the account (AD-09). */
+export interface ParentCreatedDto {
+  parent: ParentDto;
+  username: string;
+  tempPassword: string;
+}
+
+/**
+ * A child who can still be given a parent account.
+ *
+ * Students already linked to a parent are not returned at all, so the picker
+ * cannot offer a second account for the same child.
+ */
+export interface AssignableStudentDto {
+  id: string;
+  fullName: string;
+  gradeLabel: string | null;
+  avatarUrl: string | null;
+  username: string | null;
+}
 
 export interface ParentChildDto {
   id: string;

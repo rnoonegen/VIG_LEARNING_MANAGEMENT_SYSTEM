@@ -1,19 +1,21 @@
 import type { Prisma } from '@prisma/client';
 import type { CreateStudentInput, StudentDto, StudentSummaryDto, StudentSubjectLevelDto } from '@vig/shared';
+import { joinName } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import type { Tx } from '../../prisma.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { createUser } from '../../auth/service.js';
-import { signAvatar } from '../../lib/storage.js';
+import { avatarStorage, signAvatar } from '../../lib/storage.js';
+import { issueUsername } from '../../lib/accountNames.js';
 import { readableStudentIds } from '../../auth/guards.js';
 import type { AuthContext } from '../../types/express.js';
 
 /**
- * Adding a student means making them teachable and schedulable, not just naming
- * them (F6): subjects, a level per subject, weekly availability and parent access.
- * A student missing any of those surfaces as an INCOMPLETE_STUDENT_SETUP issue on
- * Admin Home rather than silently failing at scheduling time.
+ * Enrolling a child records who they are and what they study (F6). Weekly
+ * availability and parent access come afterwards, from the profile — a student
+ * still missing either surfaces as an INCOMPLETE_STUDENT_SETUP issue on Admin
+ * Home rather than silently failing at scheduling time.
  */
 
 const studentInclude = {
@@ -100,6 +102,9 @@ export async function listStudents(ctx: AuthContext): Promise<StudentSummaryDto[
       return {
         id: s.id,
         fullName: s.fullName,
+        firstName: s.firstName,
+        lastName: s.lastName,
+        username: s.username,
         gradeLabel: s.gradeLabel,
         status: s.status,
         avatarUrl: await signAvatar(s.avatarPath),
@@ -122,6 +127,9 @@ export async function getStudent(studentId: string): Promise<StudentDto> {
   return {
     id: student.id,
     fullName: student.fullName,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    username: student.username,
     gradeLabel: student.gradeLabel,
     status: student.status,
     avatarUrl: await signAvatar(student.avatarPath),
@@ -182,13 +190,21 @@ export async function createStudent(input: CreateStudentInput, actorId: string) 
     parentLink = await resolveParent(prisma, input.parent, actorId);
   }
 
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  const username = await issueUsername('S', firstName, lastName);
+
   const student = await prisma.$transaction(async (tx) => {
     const created = await tx.student.create({
       data: {
-        fullName: input.fullName,
+        fullName: joinName(firstName, lastName),
+        firstName,
+        lastName,
+        username,
         dateOfBirth: input.dateOfBirth ? new Date(`${input.dateOfBirth}T00:00:00.000Z`) : null,
         gradeLabel: input.gradeLabel ?? null,
         notes: input.notes ?? null,
+        avatarPath: input.avatarPath ?? null,
         joinedAt: new Date(),
       },
     });
@@ -228,7 +244,7 @@ export async function createStudent(input: CreateStudentInput, actorId: string) 
     action: 'STUDENT_CREATED',
     entity: 'Student',
     entityId: student.id,
-    after: { fullName: student.fullName },
+    after: { fullName: student.fullName, username },
   });
 
   return { student: await getStudent(student.id), parentTempPassword: parentLink?.tempPassword ?? null };
@@ -236,19 +252,39 @@ export async function createStudent(input: CreateStudentInput, actorId: string) 
 
 export async function updateStudent(
   studentId: string,
-  data: { fullName?: string; dateOfBirth?: string | null; gradeLabel?: string | null; notes?: string | null },
+  data: {
+    firstName?: string;
+    lastName?: string;
+    fullName?: string;
+    dateOfBirth?: string | null;
+    gradeLabel?: string | null;
+    notes?: string | null;
+  },
   actorId: string,
 ) {
   const before = await prisma.student.findUnique({
     where: { id: studentId },
-    select: { fullName: true, dateOfBirth: true, gradeLabel: true, notes: true },
+    select: { fullName: true, firstName: true, lastName: true, dateOfBirth: true, gradeLabel: true, notes: true },
   });
   if (!before) throw notFound('Student');
+
+  // The two name fields are the source of truth once either is edited; fullName
+  // follows so every existing screen keeps reading one spelling. The roll name
+  // does not move — it is on paperwork already.
+  const firstName = data.firstName ?? before.firstName ?? '';
+  const lastName = data.lastName ?? before.lastName ?? '';
+  const renamed = data.firstName !== undefined || data.lastName !== undefined;
 
   const after = await prisma.student.update({
     where: { id: studentId },
     data: {
-      ...(data.fullName !== undefined ? { fullName: data.fullName } : {}),
+      ...(data.firstName !== undefined ? { firstName: data.firstName } : {}),
+      ...(data.lastName !== undefined ? { lastName: data.lastName } : {}),
+      ...(renamed
+        ? { fullName: joinName(firstName, lastName) }
+        : data.fullName !== undefined
+          ? { fullName: data.fullName }
+          : {}),
       ...(data.gradeLabel !== undefined ? { gradeLabel: data.gradeLabel } : {}),
       ...(data.notes !== undefined ? { notes: data.notes } : {}),
       ...(data.dateOfBirth !== undefined
@@ -372,6 +408,51 @@ export async function putParentAccess(
 
   await audit({ actorId, action: 'STUDENT_PARENT_LINKED', entity: 'Student', entityId: studentId });
   return { student: await getStudent(studentId), parentTempPassword: link.tempPassword ?? null };
+}
+
+/**
+ * The photo goes straight from the browser to the private avatars bucket; only
+ * the resulting path comes back to us (AD-04).
+ *
+ * No student id is needed, because the commonest case is a photo chosen while
+ * the child is still being enrolled. The path is handed to createStudent, or to
+ * setAvatar for a child who already exists.
+ */
+export function createAvatarUploadUrl(fileName: string, mimeType: string) {
+  return avatarStorage.createUploadUrl(fileName, mimeType, 'students');
+}
+
+export async function setAvatar(studentId: string, storagePath: string, actorId: string) {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { avatarPath: true },
+  });
+  if (!student) throw notFound('Student');
+
+  await prisma.student.update({ where: { id: studentId }, data: { avatarPath: storagePath } });
+
+  // The replaced photo has no other referent, so it does not need keeping.
+  if (student.avatarPath && student.avatarPath !== storagePath) {
+    await avatarStorage.remove(student.avatarPath).catch(() => undefined);
+  }
+
+  await audit({ actorId, action: 'STUDENT_AVATAR_SET', entity: 'Student', entityId: studentId });
+  return getStudent(studentId);
+}
+
+export async function removeAvatar(studentId: string, actorId: string) {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { avatarPath: true },
+  });
+  if (!student) throw notFound('Student');
+
+  if (student.avatarPath) {
+    await prisma.student.update({ where: { id: studentId }, data: { avatarPath: null } });
+    await avatarStorage.remove(student.avatarPath).catch(() => undefined);
+    await audit({ actorId, action: 'STUDENT_AVATAR_REMOVED', entity: 'Student', entityId: studentId });
+  }
+  return getStudent(studentId);
 }
 
 /** Archiving removes a student from active operations but preserves their history (BR-17). */

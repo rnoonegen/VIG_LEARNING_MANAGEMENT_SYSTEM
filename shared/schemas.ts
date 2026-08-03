@@ -15,6 +15,7 @@ import {
   SKILL_STATUSES,
   STUDENT_STATUSES,
 } from './enums.js';
+import { PARENT_RELATIONSHIPS } from './naming.js';
 
 // --- Primitives -------------------------------------------------------------
 
@@ -61,10 +62,12 @@ export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export const forgotPasswordSchema = z.object({ username: z.string().min(1) });
 
 export const createUserSchema = z.object({
+  // School-issued names carry case (P26NagVen), so it is preserved on the way in
+  // and ignored on the way back: sign-in matches without regard to case.
   username: z
     .string()
     .min(3, 'Use at least 3 characters')
-    .regex(/^[a-z0-9._-]+$/, 'Lowercase letters, numbers, dot, underscore and hyphen only'),
+    .regex(/^[A-Za-z0-9._-]+$/, 'Letters, numbers, dot, underscore and hyphen only'),
   fullName: z.string().min(1, 'Full name is required'),
   role: z.enum(ROLES),
 });
@@ -213,11 +216,19 @@ export const subjectLevelSchema = z.object({
   levelId: uuid,
 });
 
+/**
+ * Adding a child collects who they are and what they study — nothing else.
+ * Availability and parent access are set from the profile afterwards, so
+ * enrolling is two short steps rather than a five-step wizard.
+ */
 export const createStudentSchema = z.object({
-  fullName: z.string().min(1, 'Student name is required'),
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
   dateOfBirth: dateKey.optional(),
   gradeLabel: z.string().optional(),
   notes: z.string().optional(),
+  /** Uploaded straight to the private bucket first; only the path arrives here. */
+  avatarPath: z.string().min(1).optional(),
   subjectLevels: z.array(subjectLevelSchema).default([]),
   availability: z.array(availabilitySlotSchema).default([]),
   parent: z
@@ -233,6 +244,8 @@ export const createStudentSchema = z.object({
 export type CreateStudentInput = z.infer<typeof createStudentSchema>;
 
 export const updateStudentSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
   fullName: z.string().min(1).optional(),
   dateOfBirth: dateKey.nullable().optional(),
   gradeLabel: z.string().nullable().optional(),
@@ -252,6 +265,47 @@ export const putParentAccessSchema = z.object({
 
 export const updateStudentStatusSchema = z.object({
   status: z.enum(STUDENT_STATUSES),
+});
+
+// --- Parents (M4) -----------------------------------------------------------
+
+/** Forgiving on formatting, strict on there being a number to ring. */
+export const mobileNumber = z
+  .string()
+  .min(7, 'Enter a contact number')
+  .max(20)
+  .regex(/^[0-9+()\-\s]+$/, 'Digits, spaces, +, - and brackets only');
+
+/**
+ * A parent account is created against the children it can see (BR-13). The
+ * username is issued by the API, not chosen here — the format is fixed and
+ * collisions are only visible server-side.
+ */
+export const createParentSchema = z.object({
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
+  mobileNumber,
+  relationship: z.enum(PARENT_RELATIONSHIPS),
+  avatarPath: z.string().min(1).optional(),
+  studentIds: z.array(uuid).min(1, 'Choose at least one student'),
+});
+export type CreateParentInput = z.infer<typeof createParentSchema>;
+
+export const updateParentSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  mobileNumber: mobileNumber.optional(),
+  relationship: z.enum(PARENT_RELATIONSHIPS).optional(),
+  username: createUserSchema.shape.username.optional(),
+});
+
+export const putParentStudentsSchema = z.object({
+  studentIds: z.array(uuid),
+  relationship: z.enum(PARENT_RELATIONSHIPS).optional(),
+});
+
+export const setParentStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'INACTIVE']),
 });
 
 // --- Scheduling (M5) --------------------------------------------------------

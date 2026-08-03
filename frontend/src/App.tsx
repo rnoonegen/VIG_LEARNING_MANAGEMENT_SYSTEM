@@ -17,6 +17,9 @@ import { TeacherProfilePage } from './pages/admin/teachers/TeacherProfilePage';
 import { StudentsPage } from './pages/students/StudentsPage';
 import { StudentProfilePage } from './pages/students/StudentProfilePage';
 import { AddStudentPage } from './pages/admin/students/AddStudentPage';
+import { ParentsPage } from './pages/admin/parents/ParentsPage';
+import { AddParentPage } from './pages/admin/parents/AddParentPage';
+import { ParentProfilePage } from './pages/admin/parents/ParentProfilePage';
 import { SchedulePage } from './pages/admin/schedule/SchedulePage';
 import { AddClassPage } from './pages/admin/schedule/AddClassPage';
 import { ReschedulePage } from './pages/admin/schedule/ReschedulePage';
@@ -94,6 +97,9 @@ export function App() {
         <Route path="/admin/students" element={<StudentsPage basePath="/admin/students" canManage />} />
         <Route path="/admin/students/new" element={<AddStudentPage />} />
         <Route path="/admin/students/:studentId" element={<StudentProfilePage basePath="/admin/students" canManage />} />
+        <Route path="/admin/parents" element={<ParentsPage />} />
+        <Route path="/admin/parents/new" element={<AddParentPage />} />
+        <Route path="/admin/parents/:parentId" element={<ParentProfilePage />} />
         <Route path="/admin/schedule" element={<SchedulePage />} />
         <Route path="/admin/schedule/new" element={<AddClassPage />} />
         <Route path="/admin/schedule/reschedule" element={<ReschedulePage />} />

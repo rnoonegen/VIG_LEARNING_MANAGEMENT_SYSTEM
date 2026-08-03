@@ -16,7 +16,7 @@
  */
 
 import { PrismaClient, type Prisma } from '@prisma/client';
-import { SEED_DEVELOPMENT_AREAS, addDays, startOfWeek } from '@vig/shared';
+import { SEED_DEVELOPMENT_AREAS, accountUsername, addDays, splitName, startOfWeek } from '@vig/shared';
 import { env, supabaseConfigured } from '../backend/src/env.js';
 import { supabaseAdmin, usernameToEmail } from '../backend/src/lib/supabase.js';
 import { recordState } from '../backend/src/modules/classrecord/window.js';
@@ -57,12 +57,13 @@ async function seedDevelopmentAreas() {
 /**
  * Subject → four levels → headings → sub-headings.
  *
- * Every subject has L1–L4 and nothing else, matching what the app creates for a
- * new subject. Headings and sub-headings are normally typed by the admin or the
- * assigned teacher; a couple are seeded here only so the demo has a class to
- * record against and something to tick students off with.
+ * Every subject has the same four named levels and nothing else, matching what
+ * the app creates for a new subject. Headings and sub-headings are normally
+ * typed by the admin or the assigned teacher; a couple are seeded here only so
+ * the demo has a class to record against and something to tick students off
+ * with.
  */
-const DEMO_LEVEL_NAMES = ['L1', 'L2', 'L3', 'L4'];
+const DEMO_LEVEL_NAMES = ['Valmiki', 'Vasishta', 'Vishwamitra', 'Vishwakarma'];
 
 const CURRICULUM: Array<{
   name: string;
@@ -74,7 +75,7 @@ const CURRICULUM: Array<{
     name: 'Mathematics',
     colorToken: 'violet',
     contentLevel: {
-      name: 'L3',
+      name: 'Vishwamitra',
       topics: [
         {
           name: 'Fractions',
@@ -94,7 +95,7 @@ const CURRICULUM: Array<{
     name: 'English',
     colorToken: 'orange',
     contentLevel: {
-      name: 'L2',
+      name: 'Vasishta',
       topics: [
         { name: 'Paragraph Writing', skills: ['Topic sentences', 'Supporting detail', 'Concluding sentences'] },
         { name: 'Reading Comprehension', skills: ['Main idea', 'Inference', 'Vocabulary in context'] },
@@ -105,7 +106,7 @@ const CURRICULUM: Array<{
     name: 'Science',
     colorToken: 'blue',
     contentLevel: {
-      name: 'L2',
+      name: 'Vasishta',
       topics: [
         { name: 'Materials & Properties', skills: ['States of matter', 'Mixtures and solutions', 'Reversible change'] },
         { name: 'Living Things', skills: ['Life cycles', 'Habitats'] },
@@ -228,12 +229,26 @@ async function seedDemo() {
   const parent = await prisma.parent.findUniqueOrThrow({ where: { userId: parentUser.id } });
   const parent2 = await prisma.parent.findUniqueOrThrow({ where: { userId: parent2User.id } });
 
+  // The demo accounts predate first/last names and a contact number; fill them
+  // in so the Parents screens have the same shape as anything created in-app.
+  for (const [record, contact] of [
+    [parent, '+91 98765 43210'],
+    [parent2, '+91 98765 11223'],
+  ] as const) {
+    const user = record.id === parent.id ? parentUser : parent2User;
+    const { firstName, lastName } = splitName(user.fullName);
+    await prisma.parent.update({
+      where: { id: record.id },
+      data: { firstName, lastName, mobileNumber: contact },
+    });
+  }
+
   // --- Teaching capabilities & availability --------------------------------
   const maths = await prisma.subject.findUniqueOrThrow({ where: { name: 'Mathematics' } });
   const english = await prisma.subject.findUniqueOrThrow({ where: { name: 'English' } });
   const science = await prisma.subject.findUniqueOrThrow({ where: { name: 'Science' } });
 
-  // Ranges are level display orders: 0 = L1 … 3 = L4.
+  // Ranges are level display orders: 0 = Valmiki … 3 = Vishwakarma.
   const telugu = await prisma.subject.findUniqueOrThrow({ where: { name: 'Telugu' } });
 
   const capabilities: Array<{ teacherId: string; subjectId: string; min: number; max: number; primary: boolean }> = [
@@ -272,17 +287,17 @@ async function seedDemo() {
   // --- Students -------------------------------------------------------------
   // The levels carrying demo headings, so the class has something to tick.
   const mathsLevel = await prisma.level.findUniqueOrThrow({
-    where: { subjectId_name: { subjectId: maths.id, name: 'L3' } },
+    where: { subjectId_name: { subjectId: maths.id, name: 'Vishwamitra' } },
   });
   const englishLevel = await prisma.level.findUniqueOrThrow({
-    where: { subjectId_name: { subjectId: english.id, name: 'L2' } },
+    where: { subjectId_name: { subjectId: english.id, name: 'Vasishta' } },
   });
   const scienceLevel = await prisma.level.findUniqueOrThrow({
-    where: { subjectId_name: { subjectId: science.id, name: 'L2' } },
+    where: { subjectId_name: { subjectId: science.id, name: 'Vasishta' } },
   });
 
   const teluguLevel = await prisma.level.findUniqueOrThrow({
-    where: { subjectId_name: { subjectId: telugu.id, name: 'L1' } },
+    where: { subjectId_name: { subjectId: telugu.id, name: 'Valmiki' } },
   });
 
   /**
@@ -340,8 +355,16 @@ async function seedDemo() {
   for (const spec of studentSpecs) {
     let student = await prisma.student.findFirst({ where: { fullName: spec.fullName } });
     if (!student) {
+      const { firstName, lastName } = splitName(spec.fullName);
       student = await prisma.student.create({
-        data: { fullName: spec.fullName, gradeLabel: spec.gradeLabel, joinedAt: new Date() },
+        data: {
+          fullName: spec.fullName,
+          firstName,
+          lastName,
+          username: accountUsername('S', firstName, lastName),
+          gradeLabel: spec.gradeLabel,
+          joinedAt: new Date(),
+        },
       });
 
       await prisma.studentSubjectLevel.createMany({

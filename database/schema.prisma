@@ -229,6 +229,13 @@ model Parent {
   id     String @id @default(uuid()) @db.Uuid
   userId String @unique @map("user_id") @db.Uuid
 
+  // Name is held in two fields because the username is built from them
+  // (P26NagVen). users.full_name stays the single spelling used for display.
+  firstName    String? @map("first_name")
+  lastName     String? @map("last_name")
+  /// How the school reaches this family. There is no email channel (D2).
+  mobileNumber String? @map("mobile_number")
+
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   students ParentStudent[]
 
@@ -250,6 +257,11 @@ model ParentStudent {
 model Student {
   id          String        @id @default(uuid()) @db.Uuid
   fullName    String        @map("full_name")
+  firstName   String?       @map("first_name")
+  lastName    String?       @map("last_name")
+  /// School-issued roll name (S26AarSha). Identifies the child on paperwork —
+  /// children have no sign-in, so this is not an account.
+  username    String?       @unique
   dateOfBirth DateTime?     @map("date_of_birth") @db.Date
   gradeLabel  String?       @map("grade_label")
   joinedAt    DateTime?     @map("joined_at") @db.Date
