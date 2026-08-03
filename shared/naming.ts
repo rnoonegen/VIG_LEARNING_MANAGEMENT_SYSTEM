@@ -7,6 +7,7 @@
  *
  *   P26NagVen   parent,  2026, Nagaraju Vengaldasu
  *   S26AarSha   student, 2026, Aarav Sharma
+ *   T26PriSha   teacher, 2026, Priya Sharma
  *
  * Both sides of the wire derive it from the same function: the form shows the
  * admin what the account will be called before they commit, and the API
@@ -14,7 +15,7 @@
  * collisions.
  */
 
-export type AccountPrefix = 'P' | 'S';
+export type AccountPrefix = 'P' | 'S' | 'T';
 
 /** Three characters, initial capital: "nagaraju" → "Nag". */
 function namePart(value: string): string {
@@ -24,7 +25,7 @@ function namePart(value: string): string {
 }
 
 /**
- * `P` or `S`, the two-digit year, then three characters of each name.
+ * The role letter, the two-digit year, then three characters of each name.
  *
  * Returns an empty string when there is nothing to build from, so a
  * half-completed form shows no username rather than a misleading stub.

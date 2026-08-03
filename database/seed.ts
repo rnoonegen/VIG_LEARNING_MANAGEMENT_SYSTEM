@@ -243,6 +243,26 @@ async function seedDemo() {
     });
   }
 
+  // The same for teachers, whose details are now collected when they are added.
+  // Their usernames stay as they are: priya / meera / rohit are the demo logins,
+  // not names the app issued.
+  for (const [record, user, dateOfBirth, address] of [
+    [priya, priyaUser, '1989-04-12', '14 MG Road, Bengaluru 560001'],
+    [meera, meeraUser, '1992-11-03', '7 Jubilee Hills, Hyderabad 500033'],
+    [rohit, rohitUser, '1986-07-25', '221 Banjara Hills, Hyderabad 500034'],
+  ] as const) {
+    const { firstName, lastName } = splitName(user.fullName);
+    await prisma.teacher.update({
+      where: { id: record.id },
+      data: {
+        firstName,
+        lastName,
+        dateOfBirth: new Date(`${dateOfBirth}T00:00:00.000Z`),
+        address,
+      },
+    });
+  }
+
   // --- Teaching capabilities & availability --------------------------------
   const maths = await prisma.subject.findUniqueOrThrow({ where: { name: 'Mathematics' } });
   const english = await prisma.subject.findUniqueOrThrow({ where: { name: 'English' } });

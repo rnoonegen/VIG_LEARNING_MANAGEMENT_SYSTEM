@@ -133,18 +133,33 @@ export const reorderSchema = z.object({
 
 // --- Teachers (M3) ----------------------------------------------------------
 
+/**
+ * Adding a teacher. Their name is collected in two fields because the sign-in
+ * name is built from them (T26PriSha) — and issued by the API, not chosen here,
+ * for the same reason it is for parents and students: the format is fixed and
+ * collisions are only visible server-side.
+ */
 export const createTeacherSchema = z.object({
-  username: createUserSchema.shape.username,
-  fullName: z.string().min(1),
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
+  dateOfBirth: dateKey.optional(),
+  address: z.string().optional(),
+  avatarPath: z.string().min(1).optional(),
   notes: z.string().optional(),
 });
+export type CreateTeacherInput = z.infer<typeof createTeacherSchema>;
 
 /**
  * Editing a teacher. The username is their sign-in name, so changing it changes
  * how they log in — the form says so, and the API keeps the auth account in step.
  */
 export const updateTeacherSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
   fullName: z.string().min(1, 'Full name is required').optional(),
+  // Empty clears it, so a date entered by mistake can be taken back off.
+  dateOfBirth: dateKey.or(z.literal('')).optional(),
+  address: z.string().optional(),
   username: createUserSchema.shape.username.optional(),
   notes: z.string().optional(),
 });

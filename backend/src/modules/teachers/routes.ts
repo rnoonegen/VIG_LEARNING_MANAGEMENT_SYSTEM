@@ -30,6 +30,16 @@ teachersRouter.get(
   handler(async (_req, res) => ok(res, await service.listTeachers())),
 );
 
+/** Declared before POST '/' so a photo can be chosen before the account exists. */
+teachersRouter.post(
+  '/avatar-upload-url',
+  requireRole('ADMIN'),
+  validateBody(avatarUploadUrlSchema),
+  handler(async (req, res) =>
+    ok(res, await service.createAvatarUploadUrl(req.body.fileName, req.body.mimeType)),
+  ),
+);
+
 teachersRouter.post(
   '/',
   requireRole('ADMIN'),
@@ -63,7 +73,7 @@ teachersRouter.post(
   requireRole('ADMIN'),
   validateBody(avatarUploadUrlSchema),
   handler(async (req, res) =>
-    ok(res, await service.createAvatarUploadUrl(req.params.id, req.body.fileName, req.body.mimeType)),
+    ok(res, await service.createAvatarUploadUrl(req.body.fileName, req.body.mimeType, req.params.id)),
   ),
 );
 

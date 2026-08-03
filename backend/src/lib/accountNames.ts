@@ -30,8 +30,8 @@ async function isTakenByStudent(candidate: string): Promise<boolean> {
 /**
  * P26NagVen, or P26NagVen2 when that is already somebody's.
  *
- * Parent names must clear the users table; a student roll name only has to be
- * unique among students, because a child never signs in.
+ * Parent and teacher names must clear the users table; a student roll name only
+ * has to be unique among students, because a child never signs in.
  */
 export async function issueUsername(
   prefix: AccountPrefix,
@@ -41,7 +41,7 @@ export async function issueUsername(
   const base = accountUsername(prefix, firstName, lastName);
   if (!base) throw new Error('Cannot build an account name without a first or last name');
 
-  const isTaken = prefix === 'P' ? isTakenByUser : isTakenByStudent;
+  const isTaken = prefix === 'S' ? isTakenByStudent : isTakenByUser;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     const candidate = attempt === 1 ? base : `${base}${attempt}`;

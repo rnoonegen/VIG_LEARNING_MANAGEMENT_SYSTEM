@@ -197,7 +197,13 @@ export interface TeacherDto {
   id: string;
   userId: string;
   fullName: string;
+  /** Null on teachers added before names were collected in two fields. */
+  firstName: string | null;
+  lastName: string | null;
   username: string;
+  /** YYYY-MM-DD. */
+  dateOfBirth: string | null;
+  address: string | null;
   status: UserStatus;
   avatarUrl: string | null;
   notes: string | null;
@@ -206,6 +212,14 @@ export interface TeacherDto {
   exceptions: ExceptionDto[];
   /** Classes still on the calendar for them — what deactivation leaves behind. */
   upcomingClassCount: number;
+}
+
+/** Returned once, to the admin who created the account (AD-09). */
+export interface TeacherCreatedDto {
+  teacherId: string;
+  userId: string;
+  username: string;
+  tempPassword: string;
 }
 
 export interface TeacherSummaryDto {

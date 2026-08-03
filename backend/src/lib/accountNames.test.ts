@@ -16,6 +16,10 @@ describe('accountUsername', () => {
     expect(accountUsername('S', 'Aarav', 'Sharma', in2026)).toBe('S26AarSha');
   });
 
+  it('builds the teacher format from the same rule', () => {
+    expect(accountUsername('T', 'Priya', 'Sharma', in2026)).toBe('T26PriSha');
+  });
+
   it('is unaffected by how the admin capitalised the name', () => {
     expect(accountUsername('P', 'NAGARAJU', 'VENGALDASU', in2026)).toBe(
       accountUsername('P', 'nagaraju', 'vengaldasu', in2026),

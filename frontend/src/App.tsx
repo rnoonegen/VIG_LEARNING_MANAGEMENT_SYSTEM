@@ -13,6 +13,7 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { AdminHomePage } from './pages/admin/AdminHomePage';
 import { AdminCurriculumPage, TeacherCurriculumPage } from './pages/curriculum/CurriculumTree';
 import { TeachersPage } from './pages/admin/teachers/TeachersPage';
+import { AddTeacherPage } from './pages/admin/teachers/AddTeacherPage';
 import { TeacherProfilePage } from './pages/admin/teachers/TeacherProfilePage';
 import { StudentsPage } from './pages/students/StudentsPage';
 import { StudentProfilePage } from './pages/students/StudentProfilePage';
@@ -93,6 +94,7 @@ export function App() {
         <Route path="/admin" element={<AdminHomePage />} />
         <Route path="/admin/curriculum" element={<AdminCurriculumPage />} />
         <Route path="/admin/teachers" element={<TeachersPage />} />
+        <Route path="/admin/teachers/new" element={<AddTeacherPage />} />
         <Route path="/admin/teachers/:teacherId" element={<TeacherProfilePage />} />
         <Route path="/admin/students" element={<StudentsPage basePath="/admin/students" canManage />} />
         <Route path="/admin/students/new" element={<AddStudentPage />} />

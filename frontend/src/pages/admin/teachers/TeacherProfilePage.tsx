@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { ErrorState, LoadingState } from '@/components/ui/States';
 import { Modal } from '@/components/ui/Modal';
-import { Field, Input, Select, Toggle } from '@/components/ui/Field';
+import { Field, Input, Select, Textarea, Toggle } from '@/components/ui/Field';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
 import { AvailabilityGrid, fromDayRows, toDayRows, type DayAvailability } from '@/components/AvailabilityGrid';
 import { TempPasswordModal } from './TeachersPage';
@@ -206,19 +206,26 @@ function AvatarEditor({
 }
 
 /**
- * Name and username. The username is how they sign in, so changing it changes
- * their login — the form says so rather than letting them find out.
+ * Their details and their username. The username is how they sign in, so
+ * changing it changes their login — the form says so rather than letting them
+ * find out.
  */
 function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [fullName, setFullName] = useState(teacher.fullName);
+  const [firstName, setFirstName] = useState(teacher.firstName ?? '');
+  const [lastName, setLastName] = useState(teacher.lastName ?? '');
+  const [dateOfBirth, setDateOfBirth] = useState(teacher.dateOfBirth ?? '');
+  const [address, setAddress] = useState(teacher.address ?? '');
   const [username, setUsername] = useState(teacher.username);
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: () =>
       patch(`/teachers/${teacher.id}`, {
-        ...(fullName.trim() !== teacher.fullName ? { fullName: fullName.trim() } : {}),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        dateOfBirth,
+        address: address.trim(),
         ...(username.trim() !== teacher.username ? { username: username.trim() } : {}),
       }),
     onSuccess: async () => {
@@ -228,14 +235,19 @@ function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: 
     onError: (err) => setError(errorMessage(err)),
   });
 
-  const changed = fullName.trim() !== teacher.fullName || username.trim() !== teacher.username;
+  const changed =
+    firstName.trim() !== (teacher.firstName ?? '') ||
+    lastName.trim() !== (teacher.lastName ?? '') ||
+    dateOfBirth !== (teacher.dateOfBirth ?? '') ||
+    address.trim() !== (teacher.address ?? '') ||
+    username.trim() !== teacher.username;
 
   return (
     <Modal
       open
       onClose={onClose}
       title="Edit details"
-      description="Their name as it appears across VIG, and the username they sign in with."
+      description="Their name as it appears across VIG, their contact details, and the username they sign in with."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -243,7 +255,9 @@ function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: 
           </Button>
           <Button
             onClick={() => save.mutate()}
-            disabled={!fullName.trim() || !username.trim() || !changed || save.isPending}
+            disabled={
+              !firstName.trim() || !lastName.trim() || !username.trim() || !changed || save.isPending
+            }
           >
             {save.isPending ? 'Saving…' : 'Save Changes'}
           </Button>
@@ -251,12 +265,39 @@ function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: 
       }
     >
       <div className="flex flex-col gap-4">
-        <Field label="Full name" htmlFor="teacher-full-name" required>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="First name" htmlFor="teacher-first-name-edit" required>
+            <Input
+              id="teacher-first-name-edit"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              autoFocus
+            />
+          </Field>
+          <Field label="Last name" htmlFor="teacher-last-name-edit" required>
+            <Input
+              id="teacher-last-name-edit"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <Field label="Date of birth" htmlFor="teacher-dob-edit" hint="Optional.">
           <Input
-            id="teacher-full-name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            autoFocus
+            id="teacher-dob-edit"
+            type="date"
+            value={dateOfBirth}
+            onChange={(e) => setDateOfBirth(e.target.value)}
+          />
+        </Field>
+
+        <Field label="Address" htmlFor="teacher-address-edit" hint="Optional.">
+          <Textarea
+            id="teacher-address-edit"
+            rows={3}
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
           />
         </Field>
 
@@ -291,6 +332,19 @@ function Overview({ teacher }: { teacher: TeacherDto }) {
 
   return (
     <>
+      <Section title="Details">
+        <Card>
+          <dl>
+            <DetailRow label="Name" value={teacher.fullName} />
+            <DetailRow
+              label="Date of birth"
+              value={teacher.dateOfBirth ? formatShortDate(new Date(teacher.dateOfBirth)) : '—'}
+            />
+            <DetailRow label="Address" value={teacher.address ?? '—'} />
+          </dl>
+        </Card>
+      </Section>
+
       <Account teacher={teacher} />
 
       <Section title="Teaching">

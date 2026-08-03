@@ -1,10 +1,17 @@
 import type { Prisma } from '@prisma/client';
-import type { TeacherDto, TeacherStatusResultDto, TeacherSummaryDto } from '@vig/shared';
-import { formatTime12h } from '@vig/shared';
+import type {
+  CreateTeacherInput,
+  TeacherCreatedDto,
+  TeacherDto,
+  TeacherStatusResultDto,
+  TeacherSummaryDto,
+} from '@vig/shared';
+import { formatTime12h, joinName, splitName } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { avatarStorage, signAvatar } from '../../lib/storage.js';
+import { issueUsername } from '../../lib/accountNames.js';
 import { createUser, renameUser, setUserStatus } from '../../auth/service.js';
 import { resolveAvailability } from '../scheduling/availability.js';
 
@@ -91,11 +98,19 @@ export async function getTeacher(teacherId: string): Promise<TeacherDto> {
     }),
   ]);
 
+  // Names were not always collected in two fields; fall back to splitting the
+  // one we have so an older record still edits cleanly.
+  const split = splitName(teacher.user.fullName);
+
   return {
     id: teacher.id,
     userId: teacher.userId,
     fullName: teacher.user.fullName,
+    firstName: teacher.firstName ?? split.firstName,
+    lastName: teacher.lastName ?? split.lastName,
     username: teacher.user.username,
+    dateOfBirth: teacher.dateOfBirth ? teacher.dateOfBirth.toISOString().slice(0, 10) : null,
+    address: teacher.address,
     status: teacher.user.status,
     avatarUrl,
     upcomingClassCount,
@@ -128,21 +143,52 @@ export async function getTeacher(teacherId: string): Promise<TeacherDto> {
   };
 }
 
-/** Creates the login account and the teacher record together. */
+/**
+ * Creates the login account and the teacher record together.
+ *
+ * The sign-in name is issued here rather than chosen by the admin (AD-02) — the
+ * same T26PriSha shape parents and students get — because only the API can see
+ * that another Priya Sharma already has it.
+ */
 export async function createTeacher(
-  input: { username: string; fullName: string; notes?: string },
+  input: CreateTeacherInput,
   actorId: string,
-) {
-  const { user, tempPassword } = await createUser({
-    username: input.username,
-    fullName: input.fullName,
-    role: 'TEACHER',
-    actorId,
+): Promise<TeacherCreatedDto> {
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  const fullName = joinName(firstName, lastName);
+
+  const username = await issueUsername('T', firstName, lastName);
+
+  // createUser talks to Supabase Auth, so it happens before — and outside — the
+  // database writes below.
+  const { user, tempPassword } = await createUser({ username, fullName, role: 'TEACHER', actorId });
+
+  const teacher = await prisma.$transaction(async (tx) => {
+    const updated = await tx.teacher.update({
+      where: { userId: user.id },
+      data: {
+        firstName,
+        lastName,
+        dateOfBirth: input.dateOfBirth ? new Date(`${input.dateOfBirth}T00:00:00.000Z`) : null,
+        address: input.address?.trim() || null,
+        notes: input.notes ?? null,
+      },
+    });
+
+    if (input.avatarPath) {
+      await tx.user.update({ where: { id: user.id }, data: { avatarPath: input.avatarPath } });
+    }
+
+    return updated;
   });
 
-  const teacher = await prisma.teacher.update({
-    where: { userId: user.id },
-    data: { notes: input.notes ?? null },
+  await audit({
+    actorId,
+    action: 'TEACHER_CREATED',
+    entity: 'Teacher',
+    entityId: teacher.id,
+    after: { fullName, username },
   });
 
   return { teacherId: teacher.id, userId: user.id, username: user.username, tempPassword };
@@ -150,32 +196,70 @@ export async function createTeacher(
 
 export async function updateTeacher(
   teacherId: string,
-  data: { fullName?: string; username?: string; notes?: string },
+  data: {
+    firstName?: string;
+    lastName?: string;
+    fullName?: string;
+    dateOfBirth?: string;
+    address?: string;
+    username?: string;
+    notes?: string;
+  },
   actorId: string,
 ) {
-  const teacher = await prisma.teacher.findUnique({ where: { id: teacherId } });
+  const teacher = await prisma.teacher.findUnique({
+    where: { id: teacherId },
+    include: { user: { select: { fullName: true } } },
+  });
   if (!teacher) throw notFound('Teacher');
 
   // The username is the sign-in name, so it goes through the auth service —
   // renaming here alone would leave them unable to log in.
   if (data.username) await renameUser(teacher.userId, data.username, actorId);
 
-  if (data.fullName) {
-    await prisma.user.update({ where: { id: teacher.userId }, data: { fullName: data.fullName } });
-  }
-  if (data.notes !== undefined) {
-    await prisma.teacher.update({ where: { id: teacherId }, data: { notes: data.notes } });
-  }
+  const split = splitName(teacher.user.fullName);
+  const firstName = data.firstName?.trim() ?? teacher.firstName ?? split.firstName;
+  const lastName = data.lastName?.trim() ?? teacher.lastName ?? split.lastName;
+  // An explicit full name wins; otherwise it follows the two fields it is built
+  // from, so the displayed spelling never drifts from them.
+  const fullName = data.fullName?.trim() || joinName(firstName, lastName);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.teacher.update({
+      where: { id: teacherId },
+      data: {
+        firstName,
+        lastName,
+        ...(data.dateOfBirth !== undefined
+          ? { dateOfBirth: data.dateOfBirth ? new Date(`${data.dateOfBirth}T00:00:00.000Z`) : null }
+          : {}),
+        ...(data.address !== undefined ? { address: data.address.trim() || null } : {}),
+        ...(data.notes !== undefined ? { notes: data.notes } : {}),
+      },
+    });
+
+    if (fullName && fullName !== teacher.user.fullName) {
+      await tx.user.update({ where: { id: teacher.userId }, data: { fullName } });
+    }
+  });
+
+  await audit({ actorId, action: 'TEACHER_UPDATED', entity: 'Teacher', entityId: teacherId });
   return getTeacher(teacherId);
 }
 
 /**
  * The photo goes straight from the browser to the private avatars bucket; only
  * the resulting path comes back to us (AD-04).
+ *
+ * The teacher id is optional because the commonest case is a photo chosen while
+ * the teacher is still being added. The path is handed to createTeacher, or to
+ * setAvatar for a teacher who already exists.
  */
-export async function createAvatarUploadUrl(teacherId: string, fileName: string, mimeType: string) {
-  const teacher = await prisma.teacher.findUnique({ where: { id: teacherId }, select: { id: true } });
-  if (!teacher) throw notFound('Teacher');
+export async function createAvatarUploadUrl(fileName: string, mimeType: string, teacherId?: string) {
+  if (teacherId) {
+    const teacher = await prisma.teacher.findUnique({ where: { id: teacherId }, select: { id: true } });
+    if (!teacher) throw notFound('Teacher');
+  }
   return avatarStorage.createUploadUrl(fileName, mimeType, 'teachers');
 }
 

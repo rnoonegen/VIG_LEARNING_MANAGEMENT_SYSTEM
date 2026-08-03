@@ -1,29 +1,20 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, GraduationCap, KeyRound, Plus } from 'lucide-react';
 import type { TeacherSummaryDto } from '@vig/shared';
-import { errorMessage, get, post } from '@/lib/api';
+import { get } from '@/lib/api';
 import { PageHeader } from '@/components/ui/Layout';
 import { Avatar } from '@/components/ui/Layout';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
 import { Modal } from '@/components/ui/Modal';
-import { Field, Input } from '@/components/ui/Field';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
-
-interface CreatedTeacher {
-  teacherId: string;
-  username: string;
-  tempPassword: string;
-}
 
 /** Fewer than ten teachers — the list stays deliberately simple (Flow 10). */
 export function TeachersPage() {
-  const queryClient = useQueryClient();
-  const [adding, setAdding] = useState(false);
-  const [created, setCreated] = useState<CreatedTeacher | null>(null);
+  const navigate = useNavigate();
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['teachers'],
@@ -36,7 +27,7 @@ export function TeachersPage() {
         title="Teachers"
         description="Manage teaching capabilities and availability."
         action={
-          <Button icon={<Plus size={16} />} onClick={() => setAdding(true)}>
+          <Button icon={<Plus size={16} />} onClick={() => navigate('/admin/teachers/new')}>
             Add Teacher
           </Button>
         }
@@ -52,7 +43,7 @@ export function TeachersPage() {
           title="Add your teachers"
           description="Add teachers so classes can be designed and scheduled. VIG uses what each teacher can teach, and when, to find valid class times."
           action={
-            <Button icon={<Plus size={16} />} onClick={() => setAdding(true)}>
+            <Button icon={<Plus size={16} />} onClick={() => navigate('/admin/teachers/new')}>
               Add Teacher
             </Button>
           }
@@ -106,89 +97,7 @@ export function TeachersPage() {
         </div>
       )}
 
-      {adding ? (
-        <AddTeacherModal
-          onClose={() => setAdding(false)}
-          onCreated={async (result) => {
-            await queryClient.invalidateQueries({ queryKey: ['teachers'] });
-            setAdding(false);
-            setCreated(result);
-          }}
-        />
-      ) : null}
-
-      {created ? <TempPasswordModal created={created} onClose={() => setCreated(null)} /> : null}
     </div>
-  );
-}
-
-function AddTeacherModal({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void;
-  onCreated: (result: CreatedTeacher) => void;
-}) {
-  const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const create = useMutation({
-    mutationFn: () => post<CreatedTeacher>('/teachers', { fullName: fullName.trim(), username: username.trim() }),
-    onSuccess: onCreated,
-    onError: (err) => setError(errorMessage(err)),
-  });
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Add teacher"
-      description="This creates their sign-in account and a temporary password."
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={() => create.mutate()} disabled={!fullName.trim() || !username.trim() || create.isPending}>
-            {create.isPending ? 'Creating…' : 'Add Teacher'}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <Field label="Full name" htmlFor="teacher-name" required>
-          <Input
-            id="teacher-name"
-            value={fullName}
-            onChange={(e) => {
-              setFullName(e.target.value);
-              // Suggest a username, but let the admin override it.
-              if (!username) setUsername(e.target.value.trim().toLowerCase().split(' ')[0] ?? '');
-            }}
-            placeholder="Priya Sharma"
-            autoFocus
-          />
-        </Field>
-
-        <Field
-          label="Username"
-          htmlFor="teacher-username"
-          required
-          error={error}
-          hint="Lowercase letters, numbers, dot, underscore and hyphen only."
-        >
-          <Input
-            id="teacher-username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value.toLowerCase())}
-            placeholder="priya"
-            autoCapitalize="none"
-            spellCheck={false}
-          />
-        </Field>
-      </div>
-    </Modal>
   );
 }
 
