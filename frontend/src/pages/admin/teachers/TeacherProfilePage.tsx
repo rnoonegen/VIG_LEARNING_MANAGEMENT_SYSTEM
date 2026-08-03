@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarPlus, Camera, Check, Pencil, Plus, Trash2, UserCheck, UserMinus } from 'lucide-react';
@@ -12,7 +12,7 @@ import { ErrorState, LoadingState } from '@/components/ui/States';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Input, Select, Textarea, Toggle } from '@/components/ui/Field';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
-import { AvailabilityGrid, fromDayRows, toDayRows, type DayAvailability } from '@/components/AvailabilityGrid';
+import { AvailabilitySummary } from '@/components/AvailabilityGrid';
 import { TempPasswordModal } from './TeachersPage';
 
 type Tab = 'overview' | 'teaching' | 'availability';
@@ -712,21 +712,16 @@ function CapabilityRow({
   );
 }
 
+/**
+ * What the teacher said about their own week — read-only here (F5).
+ *
+ * The hours a teacher is willing to work are theirs to state, so this reports
+ * them rather than offering a second way to set them. The admin's job is to
+ * schedule inside them.
+ */
 function Availability({ teacher }: { teacher: TeacherDto }) {
   const queryClient = useQueryClient();
-  const [rows, setRows] = useState<DayAvailability[]>(toDayRows(teacher.availability));
   const [addingException, setAddingException] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => setRows(toDayRows(teacher.availability)), [teacher.availability]);
-
-  const save = useMutation({
-    mutationFn: () => put(`/teachers/${teacher.id}/availability`, { slots: fromDayRows(rows) }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['teachers'] });
-      setSaved(true);
-    },
-  });
 
   const removeException = useMutation({
     mutationFn: (id: string) => del(`/teachers/exceptions/${id}`),
@@ -738,22 +733,18 @@ function Availability({ teacher }: { teacher: TeacherDto }) {
       <Section title="Regular weekly availability">
         <Card>
           <p className="mb-4 text-sm text-ink-2">
-            This is the teacher's normal repeating week. It is a constraint on when classes may be
-            scheduled — not the timetable itself.
+            {teacher.fullName.split(' ')[0]} sets this from their own Availability page. It is a
+            constraint on when classes may be scheduled — not the timetable itself.
           </p>
 
-          <AvailabilityGrid rows={rows} onChange={(next) => { setRows(next); setSaved(false); }} />
-
-          <div className="mt-4">
-            <Button
-              size="sm"
-              onClick={() => save.mutate()}
-              disabled={save.isPending}
-              icon={saved ? <Check size={14} /> : undefined}
-            >
-              {save.isPending ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
-            </Button>
-          </div>
+          {teacher.availability.length === 0 ? (
+            <p className="rounded-[12px] bg-warning-bg px-4 py-3 text-sm text-ink-2">
+              No hours stated yet, so no class can be scheduled for this teacher. Ask them to fill in
+              their week from <span className="font-medium">Availability</span> after they sign in.
+            </p>
+          ) : (
+            <AvailabilitySummary slots={teacher.availability} />
+          )}
         </Card>
       </Section>
 

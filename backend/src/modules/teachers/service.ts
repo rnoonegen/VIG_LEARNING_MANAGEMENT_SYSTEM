@@ -358,11 +358,26 @@ export async function putCapabilities(
   return getTeacher(teacherId);
 }
 
+/**
+ * Replaces the whole weekly pattern — the editor sends every window it holds.
+ *
+ * A day may carry several windows (Monday 9–11 and 12–1). They must not overlap:
+ * the scheduler would merge them and quietly widen the teacher's stated week.
+ */
 export async function putAvailability(
   teacherId: string,
   slots: Array<{ weekday: number; startTime: string; endTime: string }>,
   actorId: string,
 ) {
+  for (let day = 0; day < 7; day += 1) {
+    const ofDay = slots.filter((s) => s.weekday === day).sort((a, b) => a.startTime.localeCompare(b.startTime));
+    for (let i = 1; i < ofDay.length; i += 1) {
+      if (ofDay[i]!.startTime < ofDay[i - 1]!.endTime) {
+        throw badRequest('Two times on the same day overlap. Adjust them so they do not.');
+      }
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.teacherAvailability.deleteMany({ where: { teacherId } });
     if (slots.length) {

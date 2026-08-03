@@ -4,6 +4,7 @@ import {
   Bell,
   BookOpen,
   Calendar,
+  CalendarClock,
   GraduationCap,
   Heart,
   HeartHandshake,
@@ -43,6 +44,8 @@ export const ADMIN_NAV: NavItem[] = [
 export const TEACHER_NAV: NavItem[] = [
   { to: '/teacher', label: 'Home', icon: <Home size={ICON_SIZE} />, end: true },
   { to: '/teacher/schedule', label: 'Schedule', icon: <Calendar size={ICON_SIZE} /> },
+  // A teacher states their own week; the admin schedules inside it (F5).
+  { to: '/teacher/availability', label: 'Availability', icon: <CalendarClock size={ICON_SIZE} /> },
   { to: '/teacher/students', label: 'Students', icon: <Users size={ICON_SIZE} /> },
   // A teacher writes the curriculum for the levels they are assigned.
   { to: '/teacher/curriculum', label: 'Curriculum', icon: <BookOpen size={ICON_SIZE} /> },

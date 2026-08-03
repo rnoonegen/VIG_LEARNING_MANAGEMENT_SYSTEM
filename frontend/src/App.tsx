@@ -29,6 +29,7 @@ import { UsersPage } from './pages/admin/UsersPage';
 
 import { TeacherHomePage } from './pages/teacher/TeacherHomePage';
 import { TeacherSchedulePage } from './pages/teacher/TeacherSchedulePage';
+import { TeacherAvailabilityPage } from './pages/teacher/TeacherAvailabilityPage';
 import { ClassRecordPage } from './pages/teacher/ClassRecordPage';
 import { ClassProgressPage } from './pages/teacher/ClassProgressPage';
 
@@ -120,6 +121,7 @@ export function App() {
       >
         <Route path="/teacher" element={<TeacherHomePage />} />
         <Route path="/teacher/schedule" element={<TeacherSchedulePage />} />
+        <Route path="/teacher/availability" element={<TeacherAvailabilityPage />} />
         <Route path="/teacher/students" element={<StudentsPage basePath="/teacher/students" />} />
         <Route path="/teacher/students/:studentId" element={<StudentProfilePage basePath="/teacher/students" />} />
         <Route path="/teacher/curriculum" element={<TeacherCurriculumPage />} />

@@ -200,11 +200,21 @@ export const putCapabilitiesSchema = z.object({
   capabilities: z.array(capabilitySchema),
 });
 
-export const availabilitySlotSchema = z.object({
-  weekday,
-  startTime: hhmm,
-  endTime: hhmm,
-});
+/**
+ * One window of a weekly pattern. A day may hold several — Monday 9–11 and
+ * 12–1 is two slots on weekday 1, and the gap between them is time no class may
+ * be scheduled in.
+ */
+export const availabilitySlotSchema = z
+  .object({
+    weekday,
+    startTime: hhmm,
+    endTime: hhmm,
+  })
+  .refine((s) => s.startTime < s.endTime, {
+    message: 'A time must end after it starts',
+    path: ['endTime'],
+  });
 
 export const putAvailabilitySchema = z.object({
   slots: z.array(availabilitySlotSchema),

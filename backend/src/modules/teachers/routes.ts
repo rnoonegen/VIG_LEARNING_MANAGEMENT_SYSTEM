@@ -24,6 +24,16 @@ function assertSelfOrAdmin(req: Parameters<typeof auth>[0], teacherId: string): 
   throw forbidden('You can only manage your own teaching profile.');
 }
 
+/**
+ * The weekly pattern is the teacher's own statement of when they can work (F5),
+ * so only they may write it. An admin reads it — and schedules inside it.
+ */
+function assertSelf(req: Parameters<typeof auth>[0], teacherId: string): void {
+  const ctx = auth(req);
+  if (ctx.role === 'TEACHER' && ctx.teacherId === teacherId) return;
+  throw forbidden('Teachers set their own weekly availability.');
+}
+
 teachersRouter.get(
   '/',
   requireRole('ADMIN'),
@@ -115,7 +125,7 @@ teachersRouter.put(
   '/:id/availability',
   validateBody(putAvailabilitySchema),
   handler(async (req, res) => {
-    assertSelfOrAdmin(req, req.params.id);
+    assertSelf(req, req.params.id);
     return ok(res, await service.putAvailability(req.params.id, req.body.slots, auth(req).userId));
   }),
 );
