@@ -122,6 +122,10 @@ enum NotificationType {
   STUDENT_AVAILABILITY_CHANGE
   INCOMPLETE_SETUP
   PASSWORD_RESET_REQUEST
+  // Added by 018_teacher_leave.sql, which ALTERs the live type — 001 still
+  // creates it without these, so a fresh project replays to the same place.
+  LEAVE_REQUESTED
+  LEAVE_DECIDED
 }
 
 enum AttentionType {
@@ -132,6 +136,12 @@ enum AttentionType {
   CLASS_RECORD_OVERDUE
   SETUP_INCOMPLETE
   PASSWORD_RESET_REQUEST
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum AiWorkflow {
@@ -183,6 +193,7 @@ model User {
   createdMoments      Moment[]                 @relation("MomentCreator")
   auditEntries        AuditLog[]
   pushSubscriptions   PushSubscription[]
+  decidedLeave        TeacherLeaveRequest[]    @relation("LeaveDecider")
 
   @@index([role, status])
   @@map("users")
@@ -224,11 +235,12 @@ model Teacher {
   notes  String?
 
   user         User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  capabilities TeacherCapability[]
-  availability TeacherAvailability[]
-  exceptions   TeacherAvailabilityException[]
-  classes      Class[]
-  occurrences  ClassOccurrence[]
+  capabilities  TeacherCapability[]
+  availability  TeacherAvailability[]
+  exceptions    TeacherAvailabilityException[]
+  leaveRequests TeacherLeaveRequest[]
+  classes       Class[]
+  occurrences   ClassOccurrence[]
 
   @@map("teachers")
 }
@@ -423,11 +435,47 @@ model TeacherAvailabilityException {
   startTime   String?  @map("start_time")
   endTime     String?  @map("end_time")
   reason      String?
+  /// Set when this row exists because leave was approved. Withdrawing the
+  /// approval takes its exceptions with it, so the two can never disagree.
+  leaveRequestId String? @map("leave_request_id") @db.Uuid
 
-  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  teacher      Teacher              @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  leaveRequest TeacherLeaveRequest? @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
 
   @@index([teacherId, date])
   @@map("teacher_availability_exceptions")
+}
+
+/// A teacher asking to be away (F5).
+///
+/// The weekly pattern is the teacher's to state; taking a day out of it is the
+/// school's decision, so this is a request. Approving it writes the dated
+/// exceptions above — the scheduler learns nothing new, it just sees the teacher
+/// as unavailable. Classes already booked on those dates are deliberately left
+/// alone and surface as a scheduling issue instead (BR-06).
+model TeacherLeaveRequest {
+  id           String      @id @default(uuid()) @db.Uuid
+  teacherId    String      @map("teacher_id") @db.Uuid
+  /// Inclusive. Equal when the leave is one day.
+  fromDate     DateTime    @map("from_date") @db.Date
+  toDate       DateTime    @map("to_date") @db.Date
+  allDay       Boolean     @default(true) @map("all_day")
+  startTime    String?     @map("start_time")
+  endTime      String?     @map("end_time")
+  reason       String
+  status       LeaveStatus @default(PENDING)
+  decidedById  String?     @map("decided_by_id") @db.Uuid
+  decidedAt    DateTime?   @map("decided_at") @db.Timestamptz(6)
+  decisionNote String?     @map("decision_note")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  teacher    Teacher                        @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  decidedBy  User?                          @relation("LeaveDecider", fields: [decidedById], references: [id])
+  exceptions TeacherAvailabilityException[]
+
+  @@index([teacherId, fromDate])
+  @@index([status])
+  @@map("teacher_leave_requests")
 }
 
 model StudentAvailability {

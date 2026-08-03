@@ -101,6 +101,8 @@ export const NOTIFICATION_LABELS: Record<NotificationType, string> = {
   STUDENT_AVAILABILITY_CHANGE: 'Student availability change',
   INCOMPLETE_SETUP: 'Incomplete setup',
   PASSWORD_RESET_REQUEST: 'Password reset request',
+  LEAVE_REQUESTED: 'Leave request',
+  LEAVE_DECIDED: 'Leave request answered',
 };
 
 /** Weekday index → label. Index 0 is Sunday, matching Date#getDay(). */

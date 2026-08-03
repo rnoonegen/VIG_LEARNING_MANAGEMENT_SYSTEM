@@ -12,6 +12,7 @@ import type {
   ClassRecordStatus,
   DevCategory,
   DevStage,
+  LeaveStatus,
   NotificationType,
   OccurrenceStatus,
   Role,
@@ -22,6 +23,7 @@ import type {
   WeeklyUpdateItemType,
   WeeklyUpdateStatus,
 } from './enums.js';
+import type { TimeRange } from './time.js';
 
 // --- Envelope ---------------------------------------------------------------
 
@@ -212,6 +214,123 @@ export interface TeacherDto {
   exceptions: ExceptionDto[];
   /** Classes still on the calendar for them — what deactivation leaves behind. */
   upcomingClassCount: number;
+}
+
+/**
+ * A teacher's request to be away, and what became of it.
+ *
+ * Approving one writes the dated exception the scheduler already reads, so
+ * approved leave is simply unavailability that went through a gate.
+ */
+export interface TeacherLeaveRequestDto {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  /** Inclusive, YYYY-MM-DD. Equal when the leave is a single day. */
+  fromDate: string;
+  toDate: string;
+  allDay: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  reason: string;
+  status: LeaveStatus;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+  /** Whole days covered; a part-day request counts as a half day. */
+  days: number;
+  /**
+   * Classes already on the calendar inside the dates asked for. Shown to the
+   * admin before they answer — approving does not cancel them (BR-06), it makes
+   * them a scheduling issue somebody has to resolve.
+   */
+  affectedClassCount: number;
+}
+
+/**
+ * One dated day of a teacher's week.
+ *
+ * `windows` is what the day actually came to once dated exceptions were applied
+ * to the weekly pattern — the same resolution the scheduler books against. Where
+ * it differs from `patternWindows`, something happened to that date: approved
+ * leave, or hours offered on top.
+ */
+export interface TeacherWeekDayDto {
+  /** YYYY-MM-DD. */
+  date: string;
+  weekday: number;
+  /** "Mon". */
+  dayLabel: string;
+  /** "3 Aug". */
+  dateLabel: string;
+  isToday: boolean;
+  isPast: boolean;
+  /** Resolved availability — what may still be scheduled on this date. */
+  windows: TimeRange[];
+  /** What their regular week says about this weekday, before any exception. */
+  patternWindows: TimeRange[];
+  /** Set when leave covers this date. Pending leave has not moved the calendar. */
+  leaveStatus: LeaveStatus | null;
+  leaveReason: string | null;
+  leaveRequestId: string | null;
+  /** Classes still on the calendar that day — what leave would disturb. */
+  classCount: number;
+}
+
+/**
+ * The running week, with real dates (F5).
+ *
+ * The weekly pattern is a repeating shape with no dates on it; this is that
+ * shape landed on one actual week, so both sides can answer "what about
+ * Thursday?" without counting days in their head. Derived on read like the
+ * month is (AD-06), and from the same resolver the scheduler uses, so it cannot
+ * disagree with what is bookable.
+ */
+export interface TeacherWeekDto {
+  teacherId: string;
+  teacherName: string;
+  /** Monday, YYYY-MM-DD. */
+  weekStart: string;
+  /** Sunday, YYYY-MM-DD. */
+  weekEnd: string;
+  /** "3 – 9 Aug 2026". */
+  label: string;
+  /** True when this is the week today falls in. */
+  isCurrentWeek: boolean;
+  /** Seven days, Monday first. */
+  days: TeacherWeekDayDto[];
+  /** Hours still available across the week, after leave. */
+  availableHours: number;
+  classCount: number;
+  /** Days of approved leave in this week; a part-day counts as a half. */
+  leaveDays: number;
+  pendingLeaveDays: number;
+}
+
+/** One teacher's month, derived on read — nothing about it is stored (AD-06). */
+export interface TeacherMonthDto {
+  /** "2026-08". */
+  month: string;
+  monthLabel: string;
+  teacherId: string;
+  teacherName: string;
+  /** Occurrences that ran: scheduled-and-past, or explicitly completed. */
+  classesTaken: number;
+  /** Still ahead of today inside this month. */
+  classesUpcoming: number;
+  classesCancelled: number;
+  /** Distinct dates they taught on. */
+  daysTaught: number;
+  /** Days of approved leave falling in this month. */
+  leaveDays: number;
+  /** Weekdays their stated week covers, less approved leave. */
+  workingDays: number;
+  /** Leave asked for and not yet answered — days, in this month. */
+  pendingLeaveDays: number;
+  /** Class records still owed for classes that ran. */
+  recordsOutstanding: number;
+  leave: TeacherLeaveRequestDto[];
 }
 
 /** Returned once, to the admin who created the account (AD-09). */

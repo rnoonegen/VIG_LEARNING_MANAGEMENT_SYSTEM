@@ -1,5 +1,12 @@
 import { Plus, X } from 'lucide-react';
-import { WEEKDAY_LABELS, formatTime12h, toMinutes, type AvailabilitySlotDto } from '@vig/shared';
+import {
+  WEEKDAY_LABELS,
+  addDays,
+  formatTime12h,
+  fromDateKey,
+  toMinutes,
+  type AvailabilitySlotDto,
+} from '@vig/shared';
 import { Input, Toggle } from '@/components/ui/Field';
 
 export interface TimeWindow {
@@ -64,6 +71,22 @@ export function availabilityProblems(rows: DayAvailability[]): string[] {
   return problems;
 }
 
+/**
+ * The date a weekday falls on inside a given week, as "3 Aug".
+ *
+ * The pattern itself has no dates — it repeats — but somebody editing it is
+ * looking at a particular week and wants to know which Tuesday is on the row.
+ * `weekStart` is that week's Monday, so the offset is Mon=0 … Sun=6.
+ */
+function dateInWeek(weekStart: string, weekday: number): string {
+  const date = addDays(fromDateKey(weekStart), (weekday + 6) % 7);
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
 /** A sensible next window: an hour after the last one ends, or 09:00–11:00. */
 function nextWindow(windows: TimeWindow[]): TimeWindow {
   const last = [...windows].sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)).at(-1);
@@ -89,16 +112,22 @@ export function AvailabilityGrid({
   rows,
   onChange,
   disabled,
+  weekStart,
 }: {
   rows: DayAvailability[];
   onChange: (rows: DayAvailability[]) => void;
   disabled?: boolean;
+  /** Monday of the week to date the rows against. Omitted leaves them undated. */
+  weekStart?: string;
 }) {
   const setWindows = (weekday: number, windows: TimeWindow[]) => {
     onChange(rows.map((r) => (r.weekday === weekday ? { ...r, windows } : r)));
   };
 
   const ordered = [...rows].sort((a, b) => schoolWeekOrder(a.weekday, b.weekday));
+  // Dated rows need a wider label column; the times below line up with it.
+  const labelWidth = weekStart ? 'min-w-[150px]' : 'min-w-[120px]';
+  const indent = weekStart ? 'sm:pl-[162px]' : 'sm:pl-[132px]';
 
   return (
     <div className="flex flex-col gap-2">
@@ -109,21 +138,26 @@ export function AvailabilityGrid({
         return (
           <div key={row.weekday} className="rounded-[12px] border border-line bg-card px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex min-w-[120px] items-center gap-3">
+              <div className={`flex ${labelWidth} items-center gap-3`}>
                 <Toggle
                   checked={available}
                   onChange={(next) => setWindows(row.weekday, next ? [nextWindow([])] : [])}
                   label={`${label} availability`}
                   disabled={disabled}
                 />
-                <span className="text-sm font-medium text-ink">{label}</span>
+                <span className="flex items-baseline gap-1.5 whitespace-nowrap">
+                  <span className="text-sm font-medium text-ink">{label}</span>
+                  {weekStart ? (
+                    <span className="text-xs text-ink-3">{dateInWeek(weekStart, row.weekday)}</span>
+                  ) : null}
+                </span>
               </div>
 
               {available ? null : <span className="flex-1 text-xs text-ink-3">Not available</span>}
             </div>
 
             {available ? (
-              <div className="mt-2.5 flex flex-col gap-2 sm:pl-[132px]">
+              <div className={`mt-2.5 flex flex-col gap-2 ${indent}`}>
                 {row.windows.map((window, index) => (
                   <div key={index} className="flex items-center gap-2">
                     <Input

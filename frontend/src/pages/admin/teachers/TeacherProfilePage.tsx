@@ -2,7 +2,13 @@ import { useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarPlus, Camera, Check, Pencil, Plus, Trash2, UserCheck, UserMinus } from 'lucide-react';
-import type { SubjectDto, TeacherDto, TeacherStatusResultDto } from '@vig/shared';
+import type {
+  SubjectDto,
+  TeacherDto,
+  TeacherMonthDto,
+  TeacherStatusResultDto,
+  TeacherWeekDto,
+} from '@vig/shared';
 import { AVATAR_MAX_BYTES, AVATAR_MIME_TYPES, formatShortDate, formatTime12h } from '@vig/shared';
 import { del, errorMessage, get, patch, post, put } from '@/lib/api';
 import { Avatar, DetailRow, PageHeader, Section, Tabs } from '@/components/ui/Layout';
@@ -13,9 +19,11 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, Input, Select, Textarea, Toggle } from '@/components/ui/Field';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
 import { AvailabilitySummary } from '@/components/AvailabilityGrid';
+import { LeaveList, MonthPicker, TeacherMonthPanel } from '@/components/TeacherMonth';
+import { TeacherWeekPanel, WeekPicker, thisWeekStart } from '@/components/TeacherWeek';
 import { TempPasswordModal } from './TeachersPage';
 
-type Tab = 'overview' | 'teaching' | 'availability';
+type Tab = 'overview' | 'teaching' | 'availability' | 'attendance';
 
 /**
  * A teacher's profile answers two questions the scheduler needs: what can they
@@ -80,12 +88,14 @@ export function TeacherProfilePage() {
           { key: 'overview', label: 'Overview' },
           { key: 'teaching', label: 'Teaching', count: data.capabilities.length },
           { key: 'availability', label: 'Availability', count: data.availability.length },
+          { key: 'attendance', label: 'Attendance' },
         ]}
       />
 
       {tab === 'overview' ? <Overview teacher={data} /> : null}
       {tab === 'teaching' ? <Capabilities teacher={data} /> : null}
       {tab === 'availability' ? <Availability teacher={data} /> : null}
+      {tab === 'attendance' ? <Attendance teacher={data} /> : null}
 
       {editing ? <EditTeacherModal teacher={data} onClose={() => setEditing(false)} /> : null}
     </div>
@@ -722,6 +732,12 @@ function CapabilityRow({
 function Availability({ teacher }: { teacher: TeacherDto }) {
   const queryClient = useQueryClient();
   const [addingException, setAddingException] = useState(false);
+  const [weekStart, setWeekStart] = useState(thisWeekStart);
+
+  const { data: week } = useQuery({
+    queryKey: ['teachers', teacher.id, 'week', weekStart],
+    queryFn: () => get<TeacherWeekDto>(`/teachers/${teacher.id}/week`, { week: weekStart }),
+  });
 
   const removeException = useMutation({
     mutationFn: (id: string) => del(`/teachers/exceptions/${id}`),
@@ -730,6 +746,31 @@ function Availability({ teacher }: { teacher: TeacherDto }) {
 
   return (
     <>
+      {/* The dated week first: scheduling happens against real dates, and this is
+          where approved leave and one-off exceptions actually show up. */}
+      <Section
+        title="This week"
+        action={
+          <WeekPicker
+            weekStart={weekStart}
+            onChange={setWeekStart}
+            isCurrentWeek={week?.isCurrentWeek ?? false}
+          />
+        }
+      >
+        {week ? (
+          <TeacherWeekPanel week={week}>
+            <p className="text-xs text-ink-2">
+              What {teacher.fullName.split(' ')[0]} can actually teach on each date — their regular
+              week, less approved leave, plus any extra hours they offered. Leave still awaiting your
+              decision is marked but has not changed anything yet.
+            </p>
+          </TeacherWeekPanel>
+        ) : (
+          <LoadingState rows={2} />
+        )}
+      </Section>
+
       <Section title="Regular weekly availability">
         <Card>
           <p className="mb-4 text-sm text-ink-2">
@@ -803,6 +844,43 @@ function Availability({ teacher }: { teacher: TeacherDto }) {
         <ExceptionModal teacherId={teacher.id} onClose={() => setAddingException(false)} />
       ) : null}
     </>
+  );
+}
+
+/**
+ * One teacher's month: what they taught, and what they were away for.
+ *
+ * Every figure is derived from the calendar and their answered leave (AD-06), so
+ * there is no register to keep and nothing here can disagree with the schedule.
+ * Leave is reviewed on the Attendance page, where the whole queue is; this tab
+ * reports rather than duplicating that.
+ */
+function Attendance({ teacher }: { teacher: TeacherDto }) {
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['teachers', teacher.id, 'attendance', month],
+    queryFn: () => get<TeacherMonthDto>(`/teachers/${teacher.id}/attendance`, { month }),
+  });
+
+  return (
+    <Section
+      title={`${teacher.fullName.split(' ')[0]}'s month`}
+      action={<MonthPicker value={month} onChange={setMonth} />}
+    >
+      {isLoading ? (
+        <LoadingState rows={3} />
+      ) : isError || !data ? (
+        <ErrorState onRetry={() => void refetch()} />
+      ) : (
+        <TeacherMonthPanel month={data}>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-2">
+            Leave this month
+          </p>
+          <LeaveList requests={data.leave} emptyText="No leave in this month." />
+        </TeacherMonthPanel>
+      )}
+    </Section>
   );
 }
 

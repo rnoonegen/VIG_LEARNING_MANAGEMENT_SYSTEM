@@ -127,6 +127,10 @@ function linkFor(notification: NotificationDto): string | null {
   if (notification.type === 'PASSWORD_RESET_REQUEST' && payload.userId) {
     return `/admin/users?reset=${payload.userId}`;
   }
+  // Both ends of a leave request land where it can be acted on: the admin on the
+  // review queue, the teacher on their own record of it.
+  if (notification.type === 'LEAVE_REQUESTED') return '/admin/teachers/attendance';
+  if (notification.type === 'LEAVE_DECIDED') return '/teacher/availability';
   if (notification.type === 'SCHEDULE_CHANGED') return '/teacher/schedule';
   return null;
 }

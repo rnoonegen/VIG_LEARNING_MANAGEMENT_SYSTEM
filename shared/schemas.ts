@@ -15,6 +15,7 @@ import {
   SKILL_STATUSES,
   STUDENT_STATUSES,
 } from './enums.js';
+import { LEAVE_STATUSES } from './enums.js';
 import { PARENT_RELATIONSHIPS } from './naming.js';
 
 // --- Primitives -------------------------------------------------------------
@@ -233,6 +234,64 @@ export const createExceptionSchema = z
     message: 'A partial-day exception needs a start and end time',
     path: ['startTime'],
   });
+
+// --- Teacher leave ----------------------------------------------------------
+
+/** A calendar month, "2026-08". The unit the attendance overview is read in. */
+export const monthKey = z
+  .string()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Expected a month in YYYY-MM form');
+
+/**
+ * Asking for leave. A teacher states their own week, but taking a day out of it
+ * is the school's decision — so this is a request, and nothing changes on the
+ * calendar until an admin answers it.
+ */
+export const createLeaveRequestSchema = z
+  .object({
+    fromDate: dateKey,
+    toDate: dateKey,
+    allDay: z.boolean().default(true),
+    startTime: hhmm.optional(),
+    endTime: hhmm.optional(),
+    reason: z.string().min(1, 'Say why, so your administrator can answer it'),
+  })
+  .refine((v) => v.fromDate <= v.toDate, {
+    message: 'The last day cannot be before the first',
+    path: ['toDate'],
+  })
+  .refine((v) => v.allDay || (v.startTime && v.endTime), {
+    message: 'Part-day leave needs a start and end time',
+    path: ['startTime'],
+  })
+  .refine((v) => v.allDay || v.fromDate === v.toDate, {
+    message: 'Part-day leave covers one date only',
+    path: ['toDate'],
+  })
+  .refine((v) => v.allDay || !v.startTime || !v.endTime || v.startTime < v.endTime, {
+    message: 'Leave must end after it starts',
+    path: ['endTime'],
+  });
+export type CreateLeaveRequestInput = z.infer<typeof createLeaveRequestSchema>;
+
+/** The admin's answer. A note is optional on approval, expected on a refusal. */
+export const decideLeaveRequestSchema = z.object({
+  status: z.enum(['APPROVED', 'REJECTED']),
+  decisionNote: z.string().optional(),
+});
+
+export const leaveQuerySchema = z.object({
+  status: z.enum(LEAVE_STATUSES).optional(),
+});
+
+/**
+ * Which week to read. Any date inside it will do — the server snaps to the
+ * Monday — so a caller can pass "today" without doing calendar arithmetic.
+ * Omitted means the week now.
+ */
+export const weekQuerySchema = z.object({
+  week: dateKey.optional(),
+});
 
 // --- Students (M4) ----------------------------------------------------------
 

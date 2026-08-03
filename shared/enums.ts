@@ -64,8 +64,19 @@ export const NOTIFICATION_TYPES = [
   'STUDENT_AVAILABILITY_CHANGE',
   'INCOMPLETE_SETUP',
   'PASSWORD_RESET_REQUEST',
+  'LEAVE_REQUESTED',
+  'LEAVE_DECIDED',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+/**
+ * A teacher's leave, from asking to answered.
+ *
+ * Leave is the one thing a teacher cannot grant themselves: the weekly week is
+ * theirs to state, but taking a day out of it needs the school's agreement.
+ */
+export const LEAVE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type LeaveStatus = (typeof LEAVE_STATUSES)[number];
 
 /** Phase-2 AI workflows. The log ships now and stays empty until then (§2.3). */
 export const AI_WORKFLOWS = [

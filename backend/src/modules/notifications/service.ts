@@ -13,7 +13,9 @@ import { prisma } from '../../prisma.js';
  */
 const ALLOWED_BY_ROLE: Record<Role, NotificationType[]> = {
   PARENT: ['WEEKLY_UPDATE_READY'],
-  TEACHER: ['SCHEDULE_CHANGED', 'CLASS_RECORD_DUE'],
+  // The answer to a leave request is the one thing a teacher is waiting on: they
+  // cannot plan around a day off until somebody says yes.
+  TEACHER: ['SCHEDULE_CHANGED', 'CLASS_RECORD_DUE', 'LEAVE_DECIDED'],
   ADMIN: [
     'AVAILABILITY_CONFLICT',
     'TEACHER_AVAILABILITY_CHANGE',
@@ -21,6 +23,7 @@ const ALLOWED_BY_ROLE: Record<Role, NotificationType[]> = {
     'INCOMPLETE_SETUP',
     'SCHEDULE_CHANGED',
     'PASSWORD_RESET_REQUEST',
+    'LEAVE_REQUESTED',
     // A teacher letting a recording deadline pass is an operational issue only an
     // admin can act on: the class went undocumented and cannot be recovered.
     'CLASS_RECORD_DUE',

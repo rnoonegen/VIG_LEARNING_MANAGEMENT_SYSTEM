@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, GraduationCap, KeyRound, Plus } from 'lucide-react';
-import type { TeacherSummaryDto } from '@vig/shared';
+import { CalendarClock, ChevronRight, GraduationCap, KeyRound, Plus } from 'lucide-react';
+import type { TeacherLeaveRequestDto, TeacherSummaryDto } from '@vig/shared';
 import { get } from '@/lib/api';
 import { PageHeader } from '@/components/ui/Layout';
 import { Avatar } from '@/components/ui/Layout';
@@ -25,13 +25,24 @@ export function TeachersPage() {
     <div>
       <PageHeader
         title="Teachers"
-        description="Manage teaching capabilities and availability."
+        description="Manage teaching capabilities, and review availability, leave and attendance."
         action={
-          <Button icon={<Plus size={16} />} onClick={() => navigate('/admin/teachers/new')}>
-            Add Teacher
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              icon={<CalendarClock size={16} />}
+              onClick={() => navigate('/admin/teachers/attendance')}
+            >
+              Attendance
+            </Button>
+            <Button icon={<Plus size={16} />} onClick={() => navigate('/admin/teachers/new')}>
+              Add Teacher
+            </Button>
+          </div>
         }
       />
+
+      <PendingLeaveBanner />
 
       {isLoading ? (
         <LoadingState rows={4} />
@@ -98,6 +109,46 @@ export function TeachersPage() {
       )}
 
     </div>
+  );
+}
+
+/**
+ * Leave a teacher is waiting on an answer for.
+ *
+ * It sits at the top of the list because it is the one thing here that somebody
+ * else is blocked on — a teacher cannot plan around a day off until it is
+ * answered.
+ */
+function PendingLeaveBanner() {
+  const navigate = useNavigate();
+  const { data } = useQuery({
+    queryKey: ['teachers', 'leave', 'PENDING'],
+    queryFn: () => get<TeacherLeaveRequestDto[]>('/teachers/leave', { status: 'PENDING' }),
+  });
+
+  if (!data || data.length === 0) return null;
+
+  return (
+    <Card tone="warning" className="mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-ink">
+            {data.length} leave {data.length === 1 ? 'request is' : 'requests are'} waiting for your
+            answer
+          </p>
+          <p className="mt-0.5 truncate text-xs text-ink-2">
+            {data
+              .slice(0, 3)
+              .map((r) => r.teacherName)
+              .join(', ')}
+            {data.length > 3 ? ` and ${data.length - 3} more` : ''}
+          </p>
+        </div>
+        <Button size="sm" onClick={() => navigate('/admin/teachers/attendance')}>
+          Review
+        </Button>
+      </div>
+    </Card>
   );
 }
 

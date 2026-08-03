@@ -2,17 +2,25 @@ import { Router } from 'express';
 import {
   avatarUploadUrlSchema,
   createExceptionSchema,
+  createLeaveRequestSchema,
   createTeacherSchema,
+  decideLeaveRequestSchema,
+  leaveQuerySchema,
+  monthKey,
   putAvailabilitySchema,
   putCapabilitiesSchema,
   setAvatarSchema,
   setTeacherStatusSchema,
   updateTeacherSchema,
+  weekQuerySchema,
 } from '@vig/shared';
 import { handler, ok, validateBody } from '../../lib/http.js';
 import { auth, requireRole } from '../../auth/middleware.js';
-import { forbidden } from '../../lib/errors.js';
+import { badRequest, forbidden } from '../../lib/errors.js';
 import * as service from './service.js';
+import * as leave from './leave.js';
+import * as attendance from './attendance.js';
+import * as week from './week.js';
 
 export const teachersRouter = Router();
 
@@ -26,13 +34,88 @@ function assertSelfOrAdmin(req: Parameters<typeof auth>[0], teacherId: string): 
 
 /**
  * The weekly pattern is the teacher's own statement of when they can work (F5),
- * so only they may write it. An admin reads it — and schedules inside it.
+ * so only they may write it. An admin reads it — and schedules inside it. The
+ * same applies to raising leave against it.
  */
-function assertSelf(req: Parameters<typeof auth>[0], teacherId: string): void {
+function assertSelf(
+  req: Parameters<typeof auth>[0],
+  teacherId: string,
+  message = 'Teachers set their own weekly availability.',
+): void {
   const ctx = auth(req);
   if (ctx.role === 'TEACHER' && ctx.teacherId === teacherId) return;
-  throw forbidden('Teachers set their own weekly availability.');
+  throw forbidden(message);
 }
+
+/**
+ * The month being asked for, defaulting to the current one.
+ *
+ * Wall-clock months, like every other date in the school (BR-20).
+ */
+function askedMonth(value: unknown): string {
+  if (value === undefined) return new Date().toISOString().slice(0, 7);
+  const parsed = monthKey.safeParse(value);
+  if (!parsed.success) throw badRequest('Expected a month in YYYY-MM form.');
+  return parsed.data;
+}
+
+// --- Leave and attendance ---------------------------------------------------
+//
+// Declared before '/:id' so "leave" and "attendance" are never read as a
+// teacher id.
+
+/** Every teacher's leave, for the admin's review queue. */
+teachersRouter.get(
+  '/leave',
+  requireRole('ADMIN'),
+  handler(async (req, res) => {
+    const query = leaveQuerySchema.parse(req.query);
+    return ok(res, await leave.listLeave({ status: query.status }));
+  }),
+);
+
+teachersRouter.patch(
+  '/leave/:requestId',
+  requireRole('ADMIN'),
+  validateBody(decideLeaveRequestSchema),
+  handler(async (req, res) =>
+    ok(
+      res,
+      await leave.decideLeaveRequest(
+        req.params.requestId,
+        req.body.status,
+        req.body.decisionNote,
+        auth(req).userId,
+      ),
+    ),
+  ),
+);
+
+/** A teacher withdraws their own pending request; an admin may revoke any. */
+teachersRouter.delete(
+  '/leave/:requestId',
+  requireRole('ADMIN', 'TEACHER'),
+  handler(async (req, res) => {
+    const ctx = auth(req);
+    return ok(
+      res,
+      await leave.deleteLeaveRequest(req.params.requestId, {
+        role: ctx.role as 'ADMIN' | 'TEACHER',
+        teacherId: ctx.teacherId,
+        userId: ctx.userId,
+      }),
+    );
+  }),
+);
+
+/** Every teacher's month, for the admin's attendance table. */
+teachersRouter.get(
+  '/attendance',
+  requireRole('ADMIN'),
+  handler(async (req, res) =>
+    ok(res, await attendance.getMonthForAllTeachers(askedMonth(req.query.month))),
+  ),
+);
 
 teachersRouter.get(
   '/',
@@ -136,6 +219,50 @@ teachersRouter.post(
   handler(async (req, res) => {
     assertSelfOrAdmin(req, req.params.id);
     return ok(res, await service.addException(req.params.id, req.body, auth(req).userId), undefined, 201);
+  }),
+);
+
+/**
+ * Asking to be away. The teacher raises it; only an admin can answer it, which
+ * is the whole difference between leave and the weekly pattern above.
+ */
+teachersRouter.post(
+  '/:id/leave',
+  validateBody(createLeaveRequestSchema),
+  handler(async (req, res) => {
+    assertSelf(req, req.params.id, 'Teachers request their own leave.');
+    return ok(res, await leave.createLeaveRequest(req.params.id, req.body, auth(req).userId), undefined, 201);
+  }),
+);
+
+teachersRouter.get(
+  '/:id/leave',
+  handler(async (req, res) => {
+    assertSelfOrAdmin(req, req.params.id);
+    return ok(res, await leave.listLeave({ teacherId: req.params.id }));
+  }),
+);
+
+/**
+ * The running week, dated. Both portals read the same one — the teacher
+ * deciding whether to ask for leave, and the admin answering it.
+ */
+teachersRouter.get(
+  '/:id/week',
+  handler(async (req, res) => {
+    assertSelfOrAdmin(req, req.params.id);
+    const query = weekQuerySchema.safeParse(req.query);
+    if (!query.success) throw badRequest('Expected a date in YYYY-MM-DD form.');
+    return ok(res, await week.getTeacherWeek(req.params.id, query.data.week));
+  }),
+);
+
+/** The month a teacher sees for themselves, and the admin sees for anybody. */
+teachersRouter.get(
+  '/:id/attendance',
+  handler(async (req, res) => {
+    assertSelfOrAdmin(req, req.params.id);
+    return ok(res, await attendance.getTeacherMonth(req.params.id, askedMonth(req.query.month)));
   }),
 );
 

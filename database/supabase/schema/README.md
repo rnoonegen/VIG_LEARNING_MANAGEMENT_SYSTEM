@@ -57,6 +57,7 @@ only to generate the Prisma Client the backend queries through, and it is
 | `015_curriculum_authorship.sql` | author + timestamps on headings and sub-headings |
 | `016_names_and_contacts.sql` | split names + issued account names, parent mobile |
 | `017_teacher_details.sql` | teacher split name, date of birth, address |
+| `018_teacher_leave.sql` | teacher leave requests + the exceptions they generate |
 
 Foreign keys live in one file applied last, so the 39 `CREATE TABLE` statements
 have no ordering dependency between files. Keep that convention: put new tables

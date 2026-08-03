@@ -76,7 +76,18 @@ export function Select({
   );
 }
 
-/** Labelled on/off control used across the availability grids. */
+/**
+ * Labelled on/off control used across the availability grids.
+ *
+ * On is violet, like every other interactive state in the product — green is
+ * reserved for something having gone well, and a switch being on is not that.
+ *
+ * The knob is placed from `left`, not left to fall where the button's centred
+ * text would have put it: a static position inside a `<button>` is centred, so
+ * sliding it 22px from there threw it clear of the track and over whatever label
+ * sat alongside — the knob vanished against the white card and ate the first
+ * letter of the word next to it.
+ */
 export function Toggle({
   checked,
   onChange,
@@ -97,16 +108,15 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative h-6 w-11 shrink-0 rounded-full border transition-colors disabled:opacity-50',
-        checked ? 'border-success bg-success' : 'border-line bg-lavender-2',
+        'relative h-6 w-11 shrink-0 overflow-hidden rounded-full border transition-colors disabled:opacity-50',
+        checked ? 'border-violet bg-violet' : 'border-line bg-lavender-2',
       )}
     >
       <span
         className={cn(
-          'absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white transition-transform',
-          checked ? 'translate-x-[22px]' : 'translate-x-0.5',
+          'absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform',
+          checked ? 'translate-x-[20px]' : 'translate-x-0',
         )}
-        style={{ height: 18, width: 18 }}
       />
     </button>
   );
