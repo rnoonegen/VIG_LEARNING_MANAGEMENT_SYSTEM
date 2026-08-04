@@ -27,6 +27,31 @@ export function shiftWeek(weekStart: string, weeks: number): string {
   return toDateKey(addDays(fromDateKey(weekStart), weeks * 7));
 }
 
+/**
+ * A day the teacher actually works — hours they could teach in, or a class
+ * already sitting on the date. The second half matters: a class booked outside
+ * the stated week is still a day they have to be there for, and that is exactly
+ * the day worth telling somebody they cannot make.
+ */
+export function isWorkingDay(day: TeacherWeekDayDto): boolean {
+  return day.windows.length > 0 || day.classCount > 0;
+}
+
+/**
+ * Whether leave can still be asked for on a day.
+ *
+ * Three ways there is nothing to ask: the day has gone; the day is not one they
+ * work, so there is no time to be released from; or leave is already on it,
+ * waiting or granted — the API refuses a second request over the same dates, so
+ * offering one would only produce an error after the form had been filled in.
+ *
+ * Defined once because the panel decides what is tappable and the page decides
+ * what is asked for, and the two must agree.
+ */
+export function canRequestLeave(day: TeacherWeekDayDto): boolean {
+  return (!day.isPast || day.isToday) && isWorkingDay(day) && day.leaveStatus === null;
+}
+
 /** Back a week, forward a week, and a way home to the current one. */
 export function WeekPicker({
   weekStart,
@@ -215,12 +240,10 @@ export function TeacherWeekPanel({
             key={day.date}
             day={day}
             selected={day.date === selectedDate}
-            // A day that has already been cannot be asked about, so it stays a
-            // statement rather than pretending to be a choice.
+            // Days there is nothing to ask about stay statements rather than
+            // pretending to be a choice.
             onSelect={
-              onSelectDay && (!day.isPast || day.isToday)
-                ? () => onSelectDay(day.date)
-                : undefined
+              onSelectDay && canRequestLeave(day) ? () => onSelectDay(day.date) : undefined
             }
           />
         ))}

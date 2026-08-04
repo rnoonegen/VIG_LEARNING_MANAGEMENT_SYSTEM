@@ -5,6 +5,11 @@ import { prisma } from '../../prisma.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { notify, notifyAllAdmins } from '../notifications/service.js';
+import {
+  resolveAvailability,
+  type DatedException,
+  type RecurringSlot,
+} from '../scheduling/availability.js';
 
 /**
  * Teacher leave (F5).
@@ -51,6 +56,33 @@ export function datesCovered(fromDate: Date, toDate: Date): string[] {
 export function leaveDayCount(request: { fromDate: Date; toDate: Date; allDay: boolean }): number {
   const dates = datesCovered(request.fromDate, request.toDate);
   return request.allDay ? dates.length : 0.5;
+}
+
+/**
+ * Which of the dates asked for are days the teacher actually works.
+ *
+ * Leave releases somebody from time they were expected for, so a date they were
+ * never expected on has nothing to release: asking to be away on a Sunday they
+ * never teach is not a request, it is a no-op that an admin would have to read
+ * and answer anyway.
+ *
+ * A date carrying a class counts as worked whatever the weekly pattern says —
+ * the class is the expectation, and a class they cannot make is precisely the
+ * thing worth telling somebody about.
+ *
+ * Kept separate from the database so the rule can be tested directly.
+ */
+export function workingDatesIn(
+  dates: string[],
+  availability: RecurringSlot[],
+  exceptions: DatedException[],
+  datesWithClasses: ReadonlySet<string>,
+): string[] {
+  return dates.filter(
+    (key) =>
+      datesWithClasses.has(key) ||
+      resolveAvailability(availability, exceptions, dayStart(key)).length > 0,
+  );
 }
 
 function describe(request: { fromDate: Date; toDate: Date; allDay: boolean; startTime: string | null; endTime: string | null }): string {
@@ -124,14 +156,21 @@ export async function createLeaveRequest(
   input: CreateLeaveRequestInput,
   actorId: string,
 ): Promise<TeacherLeaveRequestDto> {
-  const teacher = await prisma.teacher.findUnique({
-    where: { id: teacherId },
-    include: { user: { select: { fullName: true } } },
-  });
-  if (!teacher) throw notFound('Teacher');
-
   const fromDate = dayStart(input.fromDate);
   const toDate = dayStart(input.toDate);
+
+  const teacher = await prisma.teacher.findUnique({
+    where: { id: teacherId },
+    include: {
+      user: { select: { fullName: true } },
+      availability: { select: { weekday: true, startTime: true, endTime: true } },
+      exceptions: {
+        where: { date: { gte: fromDate, lte: toDate } },
+        select: { date: true, isAvailable: true, allDay: true, startTime: true, endTime: true },
+      },
+    },
+  });
+  if (!teacher) throw notFound('Teacher');
 
   // Two live requests over the same dates would be two answers to one question.
   const clash = await prisma.teacherLeaveRequest.findFirst({
@@ -147,6 +186,37 @@ export async function createLeaveRequest(
       clash.status === 'PENDING'
         ? 'You already have a leave request waiting on these dates.'
         : 'Leave is already approved for these dates.',
+    );
+  }
+
+  // Checked after the clash above, so a date already on leave is told why it is
+  // refused rather than being reported as a day they do not work — which is
+  // true, but only because the approved leave made it so.
+  const dates = datesCovered(fromDate, toDate);
+  const dayAfter = new Date(toDate);
+  dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+
+  const occurrences = await prisma.classOccurrence.findMany({
+    where: {
+      teacherId,
+      status: 'SCHEDULED',
+      scheduledStart: { gte: fromDate, lt: dayAfter },
+    },
+    select: { scheduledStart: true },
+  });
+
+  const working = workingDatesIn(
+    dates,
+    teacher.availability,
+    teacher.exceptions,
+    new Set(occurrences.map((o) => toDateKey(o.scheduledStart))),
+  );
+
+  if (working.length === 0) {
+    throw badRequest(
+      dates.length === 1
+        ? 'You are not teaching that day, so there is no leave to ask for.'
+        : 'You are not teaching on any of those dates, so there is no leave to ask for.',
     );
   }
 

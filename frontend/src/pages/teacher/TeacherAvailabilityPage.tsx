@@ -24,7 +24,7 @@ import {
   type DayAvailability,
 } from '@/components/AvailabilityGrid';
 import { LeaveList, MonthPicker, TeacherMonthPanel } from '@/components/TeacherMonth';
-import { TeacherWeekPanel, WeekPicker, thisWeekStart } from '@/components/TeacherWeek';
+import { TeacherWeekPanel, WeekPicker, canRequestLeave, thisWeekStart } from '@/components/TeacherWeek';
 
 /**
  * A teacher's own time (F5).
@@ -123,11 +123,13 @@ function ThisWeek({
   const [picked, setPicked] = useState<string | null>(null);
   const [askingFrom, setAskingFrom] = useState<string | null>(null);
 
-  // Only days still ahead can be asked about. Deriving the selection from what
-  // is on screen — rather than storing it — means paging to another week cannot
-  // leave a date chosen that nobody can see.
-  const askable = (week?.days ?? []).filter((d) => !d.isPast || d.isToday);
+  // Deriving the selection from what is on screen — rather than storing it —
+  // means paging to another week, or having a request answered, cannot leave a
+  // date chosen that can no longer be asked for.
+  const upcoming = (week?.days ?? []).filter((d) => !d.isPast || d.isToday);
+  const askable = upcoming.filter(canRequestLeave);
   const selected = askable.find((d) => d.date === picked) ?? askable[0] ?? null;
+  const allSpokenFor = upcoming.length > 0 && upcoming.every((d) => d.leaveStatus !== null);
 
   return (
     <Section
@@ -165,8 +167,12 @@ function ThisWeek({
                   </span>
                   . Your administrator answers it, and nothing on the schedule changes until they do.
                 </>
-              ) : (
+              ) : upcoming.length === 0 ? (
                 'That week has already been. Move forward to ask for leave.'
+              ) : allSpokenFor ? (
+                'Every day left in this week already has leave on it.'
+              ) : (
+                'You are not teaching on any of the days left in this week.'
               )}
             </p>
           </div>
