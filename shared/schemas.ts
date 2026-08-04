@@ -81,23 +81,28 @@ export const updateSettingsSchema = z.object({
 
 // --- Curriculum (M2) --------------------------------------------------------
 
+/**
+ * Curriculum names are trimmed here rather than in the browser, because the
+ * uniqueness check behind them compares names — and a trailing space is not a
+ * second subject.
+ */
 export const createSubjectSchema = z.object({
-  name: z.string().min(1, 'Subject name is required'),
+  name: z.string().trim().min(1, 'Subject name is required'),
   colorToken: z.string().optional(),
 });
 
 export const createLevelSchema = z.object({
-  name: z.string().min(1, 'Level name is required'),
+  name: z.string().trim().min(1, 'Level name is required'),
 });
 
 /** A heading inside a level. */
 export const createTopicSchema = z.object({
-  name: z.string().min(1, 'Heading is required'),
+  name: z.string().trim().min(1, 'Heading is required'),
 });
 
 /** A sub-heading inside a heading — what a student is ticked off against. */
 export const createSkillSchema = z.object({
-  name: z.string().min(1, 'Sub-heading is required'),
+  name: z.string().trim().min(1, 'Sub-heading is required'),
   description: z.string().optional(),
   learningGoal: z.string().optional(),
 });
@@ -120,7 +125,7 @@ export const putCoverageSchema = z.object({
 export type PutCoverageInput = z.infer<typeof putCoverageSchema>;
 
 export const updateCurriculumNodeSchema = z.object({
-  name: z.string().min(1).optional(),
+  name: z.string().trim().min(1).optional(),
   description: z.string().optional(),
   learningGoal: z.string().optional(),
   colorToken: z.string().optional(),

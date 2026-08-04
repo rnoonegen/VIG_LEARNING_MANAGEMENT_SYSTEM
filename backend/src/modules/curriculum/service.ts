@@ -1,7 +1,7 @@
 import type { CurriculumSubjectDto, LevelDto, Role, SubjectDto } from '@vig/shared';
 import { subjectColor } from '@vig/shared';
 import { prisma } from '../../prisma.js';
-import { badRequest, notFound } from '../../lib/errors.js';
+import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 
 /**
@@ -178,6 +178,101 @@ export async function getTree(
   });
 }
 
+// --- Names ------------------------------------------------------------------
+
+type NodeKind = 'subjects' | 'levels' | 'topics' | 'skills';
+
+const delegateFor = {
+  subjects: () => prisma.subject,
+  levels: () => prisma.level,
+  topics: () => prisma.topic,
+  skills: () => prisma.skill,
+} as const;
+
+const NODE_LABEL: Record<NodeKind, string> = {
+  subjects: 'subject',
+  levels: 'level',
+  topics: 'heading',
+  skills: 'sub-heading',
+};
+
+/**
+ * Two names that read the same to a teacher are the same name. Compared
+ * trimmed, with runs of whitespace collapsed and case ignored, so "Fractions",
+ * "fractions" and "Fractions  " are one heading rather than three.
+ */
+export function normaliseName(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Refuses a duplicate before the write.
+ *
+ * The database carries the matching unique indexes (019) and would reject it
+ * anyway, but only with "that already exists" — this names the thing that is in
+ * the way, which is the difference between an admin fixing it and an admin
+ * filing a bug.
+ *
+ * Subjects and levels are matched against archived rows too, because their
+ * unique indexes cover those. A removed heading or sub-heading gives its name
+ * back: archiving is this app's delete (BR-17), and a deleted thing should not
+ * hold a name hostage.
+ */
+async function assertNameFree(
+  kind: NodeKind,
+  scope: Record<string, unknown>,
+  name: string,
+  excludeId?: string,
+): Promise<void> {
+  // Four delegates, one shape — narrowed to the two calls this needs.
+  const delegate = delegateFor[kind]() as unknown as {
+    findFirst(args: unknown): Promise<{ name: string; status: string } | null>;
+  };
+
+  const archivedCounts = kind === 'subjects' || kind === 'levels';
+
+  const clash = await delegate.findFirst({
+    where: {
+      ...scope,
+      ...(archivedCounts ? {} : ACTIVE),
+      name: { equals: name, mode: 'insensitive' },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { name: true, status: true },
+  });
+  if (!clash) return;
+
+  const label = NODE_LABEL[kind];
+  throw conflict(
+    clash.status === 'ARCHIVED'
+      ? `“${clash.name}” already exists as a removed ${label}. Rename that one rather than adding a second.`
+      : `“${clash.name}” is already here. Give this ${label} a different name.`,
+  );
+}
+
+/** Where a node's siblings live — the scope its name has to be unique within. */
+async function siblingScope(kind: NodeKind, id: string): Promise<Record<string, unknown>> {
+  switch (kind) {
+    case 'subjects':
+      return {};
+    case 'levels': {
+      const row = await prisma.level.findUnique({ where: { id }, select: { subjectId: true } });
+      if (!row) throw notFound('Level');
+      return { subjectId: row.subjectId };
+    }
+    case 'topics': {
+      const row = await prisma.topic.findUnique({ where: { id }, select: { levelId: true } });
+      if (!row) throw notFound('Heading');
+      return { levelId: row.levelId };
+    }
+    case 'skills': {
+      const row = await prisma.skill.findUnique({ where: { id }, select: { topicId: true } });
+      if (!row) throw notFound('Sub-heading');
+      return { topicId: row.topicId };
+    }
+  }
+}
+
 // --- Creates ----------------------------------------------------------------
 
 async function nextOrder(
@@ -191,13 +286,16 @@ async function nextOrder(
 
 /** A new subject arrives with its four levels already in place. */
 export async function createSubject(input: { name: string; colorToken?: string }, actorId: string) {
+  const name = normaliseName(input.name);
+  await assertNameFree('subjects', {}, name);
+
   const displayOrder = await nextOrder('subject', {});
 
   const subject = await prisma.$transaction(async (tx) => {
     const created = await tx.subject.create({
       data: {
-        name: input.name,
-        colorToken: input.colorToken ?? subjectColor(input.name),
+        name,
+        colorToken: input.colorToken ?? subjectColor(name),
         displayOrder,
       },
     });
@@ -224,18 +322,26 @@ export async function createSubject(input: { name: string; colorToken?: string }
   return subject;
 }
 
-export async function createLevel(subjectId: string, name: string) {
+export async function createLevel(subjectId: string, rawName: string) {
   const subject = await prisma.subject.findUnique({ where: { id: subjectId } });
   if (!subject) throw notFound('Subject');
+
+  const name = normaliseName(rawName);
+  await assertNameFree('levels', { subjectId }, name);
+
   return prisma.level.create({
     data: { subjectId, name, displayOrder: await nextOrder('level', { subjectId }) },
   });
 }
 
 /** A heading. The author is stamped on it — see the note at the top of this file. */
-export async function createTopic(levelId: string, name: string, actorId: string) {
+export async function createTopic(levelId: string, rawName: string, actorId: string) {
   const level = await prisma.level.findUnique({ where: { id: levelId } });
   if (!level) throw notFound('Level');
+
+  const name = normaliseName(rawName);
+  await assertNameFree('topics', { levelId }, name);
+
   return prisma.topic.create({
     data: {
       levelId,
@@ -253,10 +359,14 @@ export async function createSkill(
 ) {
   const topic = await prisma.topic.findUnique({ where: { id: topicId } });
   if (!topic) throw notFound('Heading');
+
+  const name = normaliseName(input.name);
+  await assertNameFree('skills', { topicId }, name);
+
   return prisma.skill.create({
     data: {
       topicId,
-      name: input.name,
+      name,
       description: input.description ?? null,
       learningGoal: input.learningGoal ?? null,
       createdById: actorId,
@@ -266,15 +376,6 @@ export async function createSkill(
 }
 
 // --- Updates & reordering ---------------------------------------------------
-
-type NodeKind = 'subjects' | 'levels' | 'topics' | 'skills';
-
-const delegateFor = {
-  subjects: () => prisma.subject,
-  levels: () => prisma.level,
-  topics: () => prisma.topic,
-  skills: () => prisma.skill,
-} as const;
 
 export async function updateNode(kind: NodeKind, id: string, data: Record<string, unknown>) {
   const delegate = delegateFor[kind]?.();
@@ -289,6 +390,14 @@ export async function updateNode(kind: NodeKind, id: string, data: Record<string
   const payload = Object.fromEntries(
     Object.entries(data).filter(([k, v]) => allowed[kind].includes(k) && v !== undefined),
   );
+
+  // A rename is the other way a duplicate gets in, so it is checked like a create.
+  if (typeof payload.name === 'string') {
+    const name = normaliseName(payload.name);
+    payload.name = name;
+    await assertNameFree(kind, await siblingScope(kind, id), name, id);
+  }
+
   // @ts-expect-error — four delegates, one shape
   return delegate.update({ where: { id }, data: payload });
 }
