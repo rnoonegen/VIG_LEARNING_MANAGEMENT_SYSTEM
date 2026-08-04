@@ -16,8 +16,9 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { ErrorState, LoadingState } from '@/components/ui/States';
 import { Modal } from '@/components/ui/Modal';
-import { Field, Input, Select, Textarea, Toggle } from '@/components/ui/Field';
+import { Field, Input, Select, Toggle } from '@/components/ui/Field';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
+import { ContactFields, contactChanged, contactFromDto } from '@/components/ContactFields';
 import { AvailabilitySummary } from '@/components/AvailabilityGrid';
 import { LeaveList, MonthPicker, TeacherMonthPanel } from '@/components/TeacherMonth';
 import { TeacherWeekPanel, WeekPicker, thisWeekStart } from '@/components/TeacherWeek';
@@ -225,7 +226,7 @@ function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: 
   const [firstName, setFirstName] = useState(teacher.firstName ?? '');
   const [lastName, setLastName] = useState(teacher.lastName ?? '');
   const [dateOfBirth, setDateOfBirth] = useState(teacher.dateOfBirth ?? '');
-  const [address, setAddress] = useState(teacher.address ?? '');
+  const [contact, setContact] = useState(contactFromDto(teacher));
   const [username, setUsername] = useState(teacher.username);
   const [error, setError] = useState<string | null>(null);
 
@@ -235,7 +236,7 @@ function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: 
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         dateOfBirth,
-        address: address.trim(),
+        ...contact,
         ...(username.trim() !== teacher.username ? { username: username.trim() } : {}),
       }),
     onSuccess: async () => {
@@ -249,7 +250,7 @@ function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: 
     firstName.trim() !== (teacher.firstName ?? '') ||
     lastName.trim() !== (teacher.lastName ?? '') ||
     dateOfBirth !== (teacher.dateOfBirth ?? '') ||
-    address.trim() !== (teacher.address ?? '') ||
+    contactChanged(contact, teacher) ||
     username.trim() !== teacher.username;
 
   return (
@@ -302,14 +303,7 @@ function EditTeacherModal({ teacher, onClose }: { teacher: TeacherDto; onClose: 
           />
         </Field>
 
-        <Field label="Address" htmlFor="teacher-address-edit" hint="Optional.">
-          <Textarea
-            id="teacher-address-edit"
-            rows={3}
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-          />
-        </Field>
+        <ContactFields idPrefix="teacher-edit" value={contact} onChange={setContact} />
 
         <Field
           label="Username"
@@ -350,6 +344,10 @@ function Overview({ teacher }: { teacher: TeacherDto }) {
               label="Date of birth"
               value={teacher.dateOfBirth ? formatShortDate(new Date(teacher.dateOfBirth)) : '—'}
             />
+            <DetailRow label="Email" value={teacher.email ?? '—'} />
+            <DetailRow label="Mobile" value={teacher.mobileNumber ?? '—'} />
+            <DetailRow label="Blood group" value={teacher.bloodGroup ?? '—'} />
+            <DetailRow label="Emergency contact" value={teacher.emergencyContact ?? '—'} />
             <DetailRow label="Address" value={teacher.address ?? '—'} />
           </dl>
         </Card>

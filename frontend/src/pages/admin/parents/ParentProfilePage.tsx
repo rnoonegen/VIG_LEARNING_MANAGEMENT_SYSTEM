@@ -13,6 +13,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { Pill } from '@/components/ui/Chip';
 import { PhotoPicker } from '@/components/PhotoPicker';
+import { ContactFields, contactFromDto } from '@/components/ContactFields';
 import { TempPasswordModal } from '../teachers/TeachersPage';
 
 /**
@@ -68,6 +69,10 @@ export function ParentProfilePage() {
           <dl>
             <DetailRow label="Username" value={<span className="font-mono">{data.username}</span>} />
             <DetailRow label="Mobile number" value={data.mobileNumber ?? '—'} />
+            <DetailRow label="Email" value={data.email ?? '—'} />
+            <DetailRow label="Blood group" value={data.bloodGroup ?? '—'} />
+            <DetailRow label="Emergency contact" value={data.emergencyContact ?? '—'} />
+            <DetailRow label="Address" value={data.address ?? '—'} />
             <DetailRow
               label="Relationship"
               value={data.children.find((c) => c.relationship)?.relationship ?? '—'}
@@ -130,7 +135,7 @@ function EditParentModal({ parent, onClose }: { parent: ParentDto; onClose: () =
   const queryClient = useQueryClient();
   const [firstName, setFirstName] = useState(parent.firstName ?? '');
   const [lastName, setLastName] = useState(parent.lastName ?? '');
-  const [mobileNumber, setMobileNumber] = useState(parent.mobileNumber ?? '');
+  const [contact, setContact] = useState(contactFromDto(parent));
   const [relationship, setRelationship] = useState(
     parent.children.find((c) => c.relationship)?.relationship ?? PARENT_RELATIONSHIPS[0],
   );
@@ -141,7 +146,7 @@ function EditParentModal({ parent, onClose }: { parent: ParentDto; onClose: () =
       patch(`/parents/${parent.id}`, {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        mobileNumber: mobileNumber.trim(),
+        ...contact,
         relationship,
       }),
     onSuccess: async () => {
@@ -186,15 +191,9 @@ function EditParentModal({ parent, onClose }: { parent: ParentDto; onClose: () =
           </Field>
         </div>
 
-        <Field label="Mobile number" htmlFor="edit-parent-mobile" error={error}>
-          <Input
-            id="edit-parent-mobile"
-            type="tel"
-            inputMode="tel"
-            value={mobileNumber}
-            onChange={(e) => setMobileNumber(e.target.value)}
-          />
-        </Field>
+        <ContactFields idPrefix="edit-parent" value={contact} onChange={setContact} mobileRequired />
+
+        {error ? <p className="text-xs text-danger">{error}</p> : null}
 
         <Field label="Relationship" htmlFor="edit-parent-relationship">
           <Select

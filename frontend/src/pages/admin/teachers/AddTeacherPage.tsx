@@ -7,8 +7,9 @@ import { errorMessage, post } from '@/lib/api';
 import { PageHeader } from '@/components/ui/Layout';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
-import { Field, Input, Textarea } from '@/components/ui/Field';
+import { Field, Input } from '@/components/ui/Field';
 import { PhotoPicker } from '@/components/PhotoPicker';
+import { ContactFields, EMPTY_CONTACT } from '@/components/ContactFields';
 import { TempPasswordModal } from './TeachersPage';
 import { UsernamePreview } from '../students/AddStudentPage';
 
@@ -27,7 +28,7 @@ export function AddTeacherPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
-  const [address, setAddress] = useState('');
+  const [contact, setContact] = useState(EMPTY_CONTACT);
   const [photo, setPhoto] = useState<{ path: string; previewUrl: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ username: string; tempPassword: string } | null>(null);
@@ -42,7 +43,7 @@ export function AddTeacherPage() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         dateOfBirth: dateOfBirth || undefined,
-        address: address.trim() || undefined,
+        ...contact,
         avatarPath: photo?.path,
       }),
     onSuccess: async (result) => {
@@ -101,15 +102,9 @@ export function AddTeacherPage() {
             />
           </Field>
 
-          <Field label="Address" htmlFor="teacher-address" hint="Optional.">
-            <Textarea
-              id="teacher-address"
-              rows={3}
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="14 MG Road, Bengaluru 560001"
-            />
-          </Field>
+          {/* All optional here — the teacher fills in what is missing from
+              their own Settings → Profile. */}
+          <ContactFields idPrefix="teacher" value={contact} onChange={setContact} />
 
           <UsernamePreview
             username={username}

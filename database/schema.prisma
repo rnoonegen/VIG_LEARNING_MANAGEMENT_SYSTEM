@@ -232,6 +232,13 @@ model Teacher {
   dateOfBirth DateTime? @map("date_of_birth") @db.Date
   address     String?
 
+  // Contact details the teacher maintains themselves (020). `email` is stored,
+  // never written to — there is no email channel in this system (D2).
+  email            String?
+  mobileNumber     String? @map("mobile_number")
+  bloodGroup       String? @map("blood_group")
+  emergencyContact String? @map("emergency_contact")
+
   notes  String?
 
   user         User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -255,6 +262,12 @@ model Parent {
   lastName     String? @map("last_name")
   /// How the school reaches this family. There is no email channel (D2).
   mobileNumber String? @map("mobile_number")
+
+  // The rest of the contact block, kept in step with Teacher (020).
+  email            String?
+  bloodGroup       String? @map("blood_group")
+  address          String?
+  emergencyContact String? @map("emergency_contact")
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   students ParentStudent[]

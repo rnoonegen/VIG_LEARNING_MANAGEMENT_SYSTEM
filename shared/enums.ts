@@ -15,6 +15,13 @@ export type UserStatus = (typeof USER_STATUSES)[number];
 export const STUDENT_STATUSES = ['ACTIVE', 'INACTIVE', 'ARCHIVED'] as const;
 export type StudentStatus = (typeof STUDENT_STATUSES)[number];
 
+/**
+ * Not a database enum — a picker, so the value recorded against a person is one
+ * a paramedic can read rather than free text somebody typed in a hurry.
+ */
+export const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
+export type BloodGroup = (typeof BLOOD_GROUPS)[number];
+
 export const CURRICULUM_STATUSES = ['ACTIVE', 'REVIEW', 'ARCHIVED'] as const;
 export type CurriculumStatus = (typeof CURRICULUM_STATUSES)[number];
 

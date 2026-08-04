@@ -38,6 +38,39 @@ export interface ApiError {
 
 // --- Auth -------------------------------------------------------------------
 
+/**
+ * How the school reaches a person, and who to ring if they cannot be reached
+ * (020). The same block for a teacher and for a parent.
+ */
+export interface ContactDetailsDto {
+  /** Stored, never written to — there is no email channel (D2). */
+  email: string | null;
+  mobileNumber: string | null;
+  bloodGroup: string | null;
+  address: string | null;
+  emergencyContact: string | null;
+}
+
+/**
+ * The signed-in person's own profile, as Settings → Profile reads it.
+ *
+ * Name and username are here to be shown, not edited: the sign-in name is built
+ * from the name and issued by the school, so both are the administrator's.
+ * `contact` is null for an administrator, who has no teacher or parent record
+ * to hold one.
+ */
+export interface MyProfileDto {
+  userId: string;
+  fullName: string;
+  firstName: string | null;
+  lastName: string | null;
+  username: string;
+  role: Role;
+  language: string;
+  avatarUrl: string | null;
+  contact: ContactDetailsDto | null;
+}
+
 export interface SessionUser {
   id: string;
   username: string;
@@ -195,7 +228,7 @@ export interface ExceptionDto {
   reason: string | null;
 }
 
-export interface TeacherDto {
+export interface TeacherDto extends ContactDetailsDto {
   id: string;
   userId: string;
   fullName: string;
@@ -205,7 +238,6 @@ export interface TeacherDto {
   username: string;
   /** YYYY-MM-DD. */
   dateOfBirth: string | null;
-  address: string | null;
   status: UserStatus;
   avatarUrl: string | null;
   notes: string | null;
@@ -700,14 +732,13 @@ export interface MomentDto {
  * A parent as the admin manages them: the account, the contact number, and the
  * children it grants sight of.
  */
-export interface ParentSummaryDto {
+export interface ParentSummaryDto extends ContactDetailsDto {
   id: string;
   userId: string;
   fullName: string;
   firstName: string | null;
   lastName: string | null;
   username: string;
-  mobileNumber: string | null;
   status: UserStatus;
   avatarUrl: string | null;
   children: Array<{

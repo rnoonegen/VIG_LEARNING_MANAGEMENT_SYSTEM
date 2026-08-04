@@ -322,13 +322,13 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
       detail: n.body,
       severity: 'info',
       actionLabel: 'Reset password',
-      actionHref: `/admin/users?reset=${payload.userId}`,
+      actionHref: `/settings/accounts?reset=${payload.userId}`,
       affected: [
         {
           id: payload.userId,
           label: payload.username ?? 'Account',
           sublabel: 'Awaiting an admin reset',
-          href: `/admin/users?reset=${payload.userId}`,
+          href: `/settings/accounts?reset=${payload.userId}`,
         },
       ],
     });

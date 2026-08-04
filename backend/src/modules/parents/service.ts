@@ -9,6 +9,7 @@ import { joinName, splitName } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
+import { contactPatch, toContactDto } from '../../lib/contact.js';
 import { avatarStorage, signAvatar } from '../../lib/storage.js';
 import { issueUsername } from '../../lib/accountNames.js';
 import { createUser, renameUser, setUserStatus } from '../../auth/service.js';
@@ -53,7 +54,7 @@ async function toSummary(parent: ParentWithRelations): Promise<ParentSummaryDto>
     firstName: parent.firstName ?? split.firstName,
     lastName: parent.lastName ?? split.lastName,
     username: parent.user.username,
-    mobileNumber: parent.mobileNumber,
+    ...toContactDto(parent),
     status: parent.user.status,
     avatarUrl,
     children,
@@ -141,7 +142,7 @@ export async function createParent(input: CreateParentInput, actorId: string) {
   const parent = await prisma.$transaction(async (tx) => {
     const updated = await tx.parent.update({
       where: { userId: user.id },
-      data: { firstName, lastName, mobileNumber: input.mobileNumber.trim() },
+      data: { firstName, lastName, ...contactPatch(input) },
     });
 
     if (input.avatarPath) {
@@ -175,7 +176,11 @@ export async function updateParent(
   data: {
     firstName?: string;
     lastName?: string;
+    email?: string;
     mobileNumber?: string;
+    bloodGroup?: string;
+    address?: string;
+    emergencyContact?: string;
     relationship?: string;
     username?: string;
   },
@@ -200,11 +205,7 @@ export async function updateParent(
   await prisma.$transaction(async (tx) => {
     await tx.parent.update({
       where: { id: parentId },
-      data: {
-        firstName,
-        lastName,
-        ...(data.mobileNumber !== undefined ? { mobileNumber: data.mobileNumber.trim() } : {}),
-      },
+      data: { firstName, lastName, ...contactPatch(data) },
     });
 
     const fullName = joinName(firstName, lastName);

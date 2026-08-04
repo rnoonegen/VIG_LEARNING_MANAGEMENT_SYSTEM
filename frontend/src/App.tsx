@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { Role } from '@vig/shared';
 import { homeRouteFor, useAuth } from './app/AuthProvider';
 import { ADMIN_NAV, PARENT_NAV, Shell, TEACHER_NAV } from './layouts/Shell';
@@ -7,7 +7,11 @@ import { LoadingState } from './components/ui/States';
 import { LoginPage } from './pages/auth/LoginPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { ChangePasswordPage } from './pages/auth/ChangePasswordPage';
-import { SettingsPage } from './pages/SettingsPage';
+import { SettingsLayout } from './pages/settings/SettingsLayout';
+import { ProfileSettingsPage } from './pages/settings/ProfileSettingsPage';
+import { NotificationSettingsPage } from './pages/settings/NotificationSettingsPage';
+import { SecuritySettingsPage } from './pages/settings/SecuritySettingsPage';
+import { AccountsSettingsPage } from './pages/settings/AccountsSettingsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 
 import { AdminHomePage } from './pages/admin/AdminHomePage';
@@ -26,7 +30,6 @@ import { SchedulePage } from './pages/admin/schedule/SchedulePage';
 import { AddClassPage } from './pages/admin/schedule/AddClassPage';
 import { ReschedulePage } from './pages/admin/schedule/ReschedulePage';
 import { WeeklyUpdatesPage } from './pages/admin/WeeklyUpdatesPage';
-import { UsersPage } from './pages/admin/UsersPage';
 
 import { TeacherHomePage } from './pages/teacher/TeacherHomePage';
 import { TeacherSchedulePage } from './pages/teacher/TeacherSchedulePage';
@@ -62,6 +65,23 @@ function Protected({ roles, children }: { roles: Role[]; children: React.ReactNo
   if (!roles.includes(user.role)) return <Navigate to={homeRouteFor(user)} replace />;
 
   return <>{children}</>;
+}
+
+/**
+ * Accounts lives under Settings but is the admin's alone. The settings shell is
+ * shared by all three roles, so the guard is on the section rather than on the
+ * branch of the route tree.
+ */
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (user && user.role !== 'ADMIN') return <Navigate to="/settings/profile" replace />;
+  return <>{children}</>;
+}
+
+/** The old Accounts path, kept alive for links already sent out. */
+function AccountsRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/settings/accounts${search}`} replace />;
 }
 
 function RootRedirect() {
@@ -109,7 +129,9 @@ export function App() {
         <Route path="/admin/schedule/new" element={<AddClassPage />} />
         <Route path="/admin/schedule/reschedule" element={<ReschedulePage />} />
         <Route path="/admin/weekly-updates" element={<WeeklyUpdatesPage />} />
-        <Route path="/admin/users" element={<UsersPage />} />
+        {/* Accounts moved under Settings. Notifications already sent carry the
+            old link, so it keeps working — with the ?reset= id intact. */}
+        <Route path="/admin/users" element={<AccountsRedirect />} />
         <Route path="/admin/moments" element={<MomentsPage />} />
       </Route>
 
@@ -165,7 +187,15 @@ export function App() {
           </Protected>
         }
       >
-        <Route path="/settings" element={<SettingsPage />} />
+        {/* Settings is a place with sections, each its own route so it can be
+            linked to — Accounts is, from the password-reset notification. */}
+        <Route path="/settings" element={<SettingsLayout />}>
+          <Route index element={<Navigate to="/settings/profile" replace />} />
+          <Route path="profile" element={<ProfileSettingsPage />} />
+          <Route path="notifications" element={<NotificationSettingsPage />} />
+          <Route path="security" element={<SecuritySettingsPage />} />
+          <Route path="accounts" element={<AdminOnly><AccountsSettingsPage /></AdminOnly>} />
+        </Route>
         <Route path="/notifications" element={<NotificationsPage />} />
       </Route>
 

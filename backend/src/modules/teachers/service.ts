@@ -10,6 +10,7 @@ import { formatTime12h, joinName, splitName } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
+import { contactPatch, toContactDto } from '../../lib/contact.js';
 import { avatarStorage, signAvatar } from '../../lib/storage.js';
 import { issueUsername } from '../../lib/accountNames.js';
 import { createUser, renameUser, setUserStatus } from '../../auth/service.js';
@@ -110,7 +111,7 @@ export async function getTeacher(teacherId: string): Promise<TeacherDto> {
     lastName: teacher.lastName ?? split.lastName,
     username: teacher.user.username,
     dateOfBirth: teacher.dateOfBirth ? teacher.dateOfBirth.toISOString().slice(0, 10) : null,
-    address: teacher.address,
+    ...toContactDto(teacher),
     status: teacher.user.status,
     avatarUrl,
     upcomingClassCount,
@@ -171,7 +172,7 @@ export async function createTeacher(
         firstName,
         lastName,
         dateOfBirth: input.dateOfBirth ? new Date(`${input.dateOfBirth}T00:00:00.000Z`) : null,
-        address: input.address?.trim() || null,
+        ...contactPatch(input),
         notes: input.notes ?? null,
       },
     });
@@ -201,7 +202,11 @@ export async function updateTeacher(
     lastName?: string;
     fullName?: string;
     dateOfBirth?: string;
+    email?: string;
+    mobileNumber?: string;
+    bloodGroup?: string;
     address?: string;
+    emergencyContact?: string;
     username?: string;
     notes?: string;
   },
@@ -233,7 +238,7 @@ export async function updateTeacher(
         ...(data.dateOfBirth !== undefined
           ? { dateOfBirth: data.dateOfBirth ? new Date(`${data.dateOfBirth}T00:00:00.000Z`) : null }
           : {}),
-        ...(data.address !== undefined ? { address: data.address.trim() || null } : {}),
+        ...contactPatch(data),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
       },
     });

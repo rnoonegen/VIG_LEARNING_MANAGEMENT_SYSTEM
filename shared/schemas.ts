@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import {
   ATTENDANCE_STATUSES,
+  BLOOD_GROUPS,
   CURRICULUM_STATUSES,
   DEV_CATEGORIES,
   DEV_STAGES,
@@ -35,6 +36,47 @@ const timeRange = z
     message: 'End time must be after start time',
     path: ['endTime'],
   });
+
+// --- Contact details --------------------------------------------------------
+
+/** Forgiving on formatting, strict on there being a number to ring. */
+export const mobileNumber = z
+  .string()
+  .min(7, 'Enter a contact number')
+  .max(20)
+  .regex(/^[0-9+()\-\s]+$/, 'Digits, spaces, +, - and brackets only');
+
+/** Optional, and clearable: an empty string takes a detail back off. */
+const clearable = <T extends z.ZodTypeAny>(field: T) => field.or(z.literal('')).optional();
+
+/**
+ * What the school keeps in order to reach a person — and, if that person is
+ * unwell, to reach someone else (020).
+ *
+ * The same five fields for a teacher and for a parent, so one profile form
+ * serves both. All optional: this is a block somebody fills in over time, not a
+ * gate on their first sign-in.
+ */
+export const contactDetailsSchema = z.object({
+  email: clearable(z.string().trim().email('Enter a valid email address')),
+  mobileNumber: clearable(mobileNumber),
+  bloodGroup: clearable(z.enum(BLOOD_GROUPS)),
+  address: z.string().max(500).optional(),
+  emergencyContact: clearable(mobileNumber),
+});
+export type ContactDetailsInput = z.infer<typeof contactDetailsSchema>;
+
+/**
+ * A person editing their own profile.
+ *
+ * Their name is not here. The sign-in name is built from it (T26PriSha) and
+ * issued by the school, so first and last name stay the administrator's to
+ * change — the form shows them, read-only, and says why.
+ */
+export const updateMyProfileSchema = contactDetailsSchema.extend({
+  language: z.string().min(2).optional(),
+});
+export type UpdateMyProfileInput = z.infer<typeof updateMyProfileSchema>;
 
 // --- Auth (M1) --------------------------------------------------------------
 
@@ -145,11 +187,10 @@ export const reorderSchema = z.object({
  * for the same reason it is for parents and students: the format is fixed and
  * collisions are only visible server-side.
  */
-export const createTeacherSchema = z.object({
+export const createTeacherSchema = contactDetailsSchema.extend({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   dateOfBirth: dateKey.optional(),
-  address: z.string().optional(),
   avatarPath: z.string().min(1).optional(),
   notes: z.string().optional(),
 });
@@ -159,13 +200,12 @@ export type CreateTeacherInput = z.infer<typeof createTeacherSchema>;
  * Editing a teacher. The username is their sign-in name, so changing it changes
  * how they log in — the form says so, and the API keeps the auth account in step.
  */
-export const updateTeacherSchema = z.object({
+export const updateTeacherSchema = contactDetailsSchema.extend({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   fullName: z.string().min(1, 'Full name is required').optional(),
   // Empty clears it, so a date entered by mistake can be taken back off.
   dateOfBirth: dateKey.or(z.literal('')).optional(),
-  address: z.string().optional(),
   username: createUserSchema.shape.username.optional(),
   notes: z.string().optional(),
 });
@@ -357,22 +397,20 @@ export const updateStudentStatusSchema = z.object({
 });
 
 // --- Parents (M4) -----------------------------------------------------------
-
-/** Forgiving on formatting, strict on there being a number to ring. */
-export const mobileNumber = z
-  .string()
-  .min(7, 'Enter a contact number')
-  .max(20)
-  .regex(/^[0-9+()\-\s]+$/, 'Digits, spaces, +, - and brackets only');
+//
+// `mobileNumber` and the rest of the contact block live under Contact details,
+// at the top: a teacher has the same five fields.
 
 /**
  * A parent account is created against the children it can see (BR-13). The
  * username is issued by the API, not chosen here — the format is fixed and
  * collisions are only visible server-side.
  */
-export const createParentSchema = z.object({
+export const createParentSchema = contactDetailsSchema.extend({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
+  // Required here, unlike the rest of the block: an account with no number is a
+  // family the school cannot reach.
   mobileNumber,
   relationship: z.enum(PARENT_RELATIONSHIPS),
   avatarPath: z.string().min(1).optional(),
@@ -380,7 +418,7 @@ export const createParentSchema = z.object({
 });
 export type CreateParentInput = z.infer<typeof createParentSchema>;
 
-export const updateParentSchema = z.object({
+export const updateParentSchema = contactDetailsSchema.extend({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   mobileNumber: mobileNumber.optional(),

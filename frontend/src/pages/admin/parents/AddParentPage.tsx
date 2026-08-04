@@ -11,6 +11,7 @@ import { Card, CardHeader } from '@/components/ui/Card';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { LoadingState } from '@/components/ui/States';
 import { PhotoPicker } from '@/components/PhotoPicker';
+import { ContactFields, EMPTY_CONTACT } from '@/components/ContactFields';
 import { TempPasswordModal } from '../teachers/TeachersPage';
 import { UsernamePreview } from '../students/AddStudentPage';
 
@@ -28,7 +29,7 @@ export function AddParentPage() {
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [contact, setContact] = useState(EMPTY_CONTACT);
   const [relationship, setRelationship] = useState<string>(PARENT_RELATIONSHIPS[0]);
   const [photo, setPhoto] = useState<{ path: string; previewUrl: string } | null>(null);
   const [chosen, setChosen] = useState<AssignableStudentDto[]>([]);
@@ -49,7 +50,7 @@ export function AddParentPage() {
       post<ParentCreatedDto>('/parents', {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        mobileNumber: mobileNumber.trim(),
+        ...contact,
         relationship,
         avatarPath: photo?.path,
         studentIds: chosen.map((s) => s.id),
@@ -68,7 +69,7 @@ export function AddParentPage() {
   const complete =
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
-    mobileNumber.trim().length >= 7 &&
+    contact.mobileNumber.trim().length >= 7 &&
     chosen.length > 0;
 
   if (isLoading) return <LoadingState rows={5} />;
@@ -111,37 +112,23 @@ export function AddParentPage() {
             </Field>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Mobile number"
-              htmlFor="parent-mobile"
-              required
-              hint="How the school reaches this family."
+          <Field label="Relationship" htmlFor="parent-relationship" required>
+            <Select
+              id="parent-relationship"
+              value={relationship}
+              onChange={(e) => setRelationship(e.target.value)}
             >
-              <Input
-                id="parent-mobile"
-                type="tel"
-                inputMode="tel"
-                value={mobileNumber}
-                onChange={(e) => setMobileNumber(e.target.value)}
-                placeholder="+91 98765 43210"
-              />
-            </Field>
+              {PARENT_RELATIONSHIPS.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-            <Field label="Relationship" htmlFor="parent-relationship" required>
-              <Select
-                id="parent-relationship"
-                value={relationship}
-                onChange={(e) => setRelationship(e.target.value)}
-              >
-                {PARENT_RELATIONSHIPS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
+          {/* The mobile number is required; the rest of the block is what the
+              parent fills in for themselves later. */}
+          <ContactFields idPrefix="parent" value={contact} onChange={setContact} mobileRequired />
 
           <StudentPicker
             available={available}

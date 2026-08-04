@@ -21,15 +21,40 @@ export function serviceWorkerSupported(): boolean {
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!serviceWorkerSupported()) return null;
-  // The dev server serves modules unbundled; a caching worker in front of that
-  // fights HMR for no benefit.
-  if (import.meta.env.DEV) return null;
+
+  if (import.meta.env.DEV) {
+    // Declining to register is not enough. A worker registered once — by a
+    // production build, a preview, a colleague's deploy on the same port —
+    // keeps controlling this origin afterwards, and it serves /src/*.tsx
+    // cache-first. The result is a tab that boots last week's app while the
+    // HMR-connected tab beside it shows today's, which reads as "my change did
+    // not apply" and costs an afternoon. So dev actively clears it.
+    await unregisterServiceWorkers();
+    return null;
+  }
 
   try {
     return await navigator.serviceWorker.register(SW_URL, { scope: '/' });
   } catch (error) {
     console.warn('[pwa] service worker registration failed', error);
     return null;
+  }
+}
+
+/** Best-effort teardown: an unusable dev session is worse than no offline shell. */
+async function unregisterServiceWorkers(): Promise<void> {
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    if (registrations.length === 0) return;
+
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key.startsWith('vig-')).map((key) => caches.delete(key)));
+    }
+    console.info('[pwa] removed a stale service worker left over from a production build');
+  } catch (error) {
+    console.warn('[pwa] could not remove the existing service worker', error);
   }
 }
 

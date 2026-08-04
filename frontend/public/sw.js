@@ -8,13 +8,18 @@
  *   navigation  → network first, falling back to the cached app shell. A parent
  *                 on a weak connection sees the app with an offline banner
  *                 rather than the browser's dinosaur.
- *   static      → cache first. Hashed Vite assets are immutable.
+ *   static      → cache first, but only for content-hashed output. A cache-first
+ *                 rule is only safe where the URL changes when the bytes do,
+ *                 and /assets/index-CsMc36S1.js does. Anything else — a dev
+ *                 module at /src/App.tsx, an HTML file — goes to the network.
  *   /api/       → never cached, never intercepted. Stale school data (an old
  *                 timetable, a resolved conflict) is worse than no data, and
  *                 writes must not appear to succeed while queued.
  */
 
-const VERSION = 'v1';
+// Bumping this purges every older vig-* cache on activate. v2 drops caches that
+// v1 filled with unhashed dev modules, which it should never have held.
+const VERSION = 'v2';
 const SHELL_CACHE = `vig-shell-${VERSION}`;
 const ASSET_CACHE = `vig-assets-${VERSION}`;
 
@@ -45,6 +50,11 @@ self.addEventListener('activate', (event) => {
       .then(() => self.clients.claim()),
   );
 });
+
+/** Only files whose URL changes when their contents do. */
+function isImmutable(url) {
+  return url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/');
+}
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -78,6 +88,12 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
+
+  // Everything else is left to the network. Vite's build writes content-hashed
+  // files under /assets/, so those can be held forever; a path that can change
+  // underneath its own URL cannot, and holding one is how a browser ends up
+  // running an app that no longer exists in the repository.
+  if (!isImmutable(url)) return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

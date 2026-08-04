@@ -20,6 +20,7 @@ import { developmentAreasRouter, studentDevelopmentRouter } from './modules/deve
 import { momentsRouter, studentMomentsRouter } from './modules/moments/routes.js';
 import { parentRouter } from './modules/parent/routes.js';
 import { parentsRouter } from './modules/parents/routes.js';
+import { profileRouter } from './modules/profile/routes.js';
 import { weeklyRouter } from './modules/weekly/routes.js';
 import { notificationsRouter } from './modules/notifications/routes.js';
 import { opsRouter } from './modules/ops/routes.js';
@@ -59,6 +60,9 @@ export function createApp() {
   api.use(requireAuth, requirePasswordChanged);
 
   api.use('/admin/users', adminUsersRouter);
+  // The caller's own profile, for any role. Everything under it is scoped to
+  // the session, never to an id in the path.
+  api.use('/profile', profileRouter);
   api.use('/curriculum', curriculumRouter);
   api.use('/teachers', teachersRouter);
 
