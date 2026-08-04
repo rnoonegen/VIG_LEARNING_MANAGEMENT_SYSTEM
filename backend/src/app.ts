@@ -18,6 +18,7 @@ import {
 import { learningRouter } from './modules/learning/routes.js';
 import { developmentAreasRouter, studentDevelopmentRouter } from './modules/development/routes.js';
 import { momentsRouter, studentMomentsRouter } from './modules/moments/routes.js';
+import { momentCollectionsRouter } from './modules/moments/collections.routes.js';
 import { parentRouter } from './modules/parent/routes.js';
 import { parentsRouter } from './modules/parents/routes.js';
 import { profileRouter } from './modules/profile/routes.js';
@@ -86,6 +87,9 @@ export function createApp() {
 
   api.use('/development', developmentAreasRouter);
   api.use('/moments', momentsRouter);
+  // Moments as a collection — a heading with one entry per child. Separate from
+  // /moments above, which is the flat gallery class records still write to.
+  api.use('/moment-collections', momentCollectionsRouter);
   api.use('/parent', parentRouter);
   // Admin-facing parent administration; /parent above is the parent's own API.
   api.use('/parents', parentsRouter);

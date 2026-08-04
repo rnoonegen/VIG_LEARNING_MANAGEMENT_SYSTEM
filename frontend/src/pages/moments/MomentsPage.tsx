@@ -1,184 +1,148 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ImagePlus, Upload } from 'lucide-react';
-import type { StudentSummaryDto } from '@vig/shared';
-import { errorMessage, get, post } from '@/lib/api';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Sparkles } from 'lucide-react';
+import { useAuth } from '@/app/AuthProvider';
 import { PageHeader } from '@/components/ui/Layout';
 import { Button } from '@/components/ui/Button';
-import { Modal } from '@/components/ui/Modal';
-import { Field, Input, Textarea } from '@/components/ui/Field';
-import { MomentsGrid } from '@/components/MomentsGrid';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
+import { asToken, cn, TOKEN_STYLES } from '@/lib/ui';
+import { MomentCard } from './MomentCard';
+import { MomentFormModal } from './MomentFormModal';
+import { useMoments } from './momentsApi';
 
 /**
- * The media gallery. Photos and videos with educational context — what happened,
- * when, which students, and which class it came from (Flow 12).
+ * Moments — the staff view.
+ *
+ * An admin sees every moment in the school; a teacher sees the ones they opened
+ * themselves. That split is decided by the API, so this page renders whatever
+ * comes back and only changes its wording.
  */
-export function MomentsPage() {
-  const [adding, setAdding] = useState(false);
+export function MomentsPage({ basePath }: { basePath: string }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [creating, setCreating] = useState(false);
+  const [subjectId, setSubjectId] = useState<string | null>(null);
+
+  const { data, isLoading, isError, refetch } = useMoments();
+  const isAdmin = user?.role === 'ADMIN';
+
+  // The filter offers the subjects actually present in the list, not the whole
+  // curriculum — a chip that returns nothing is noise.
+  const subjects = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string; colorToken: string; count: number }>();
+    for (const moment of data ?? []) {
+      const existing = seen.get(moment.subject.id);
+      if (existing) existing.count += 1;
+      else seen.set(moment.subject.id, { ...moment.subject, count: 1 });
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [data]);
+
+  const visible = subjectId ? (data ?? []).filter((m) => m.subject.id === subjectId) : (data ?? []);
+
+  const newMomentButton = (
+    <Button icon={<Sparkles size={16} />} onClick={() => setCreating(true)}>
+      New Moment
+    </Button>
+  );
 
   return (
     <div>
       <PageHeader
         title="Moments"
-        description="Photos and videos from classes, with the context that makes them meaningful."
-        action={
-          <Button icon={<ImagePlus size={16} />} onClick={() => setAdding(true)}>
-            Add Moment
-          </Button>
+        description={
+          isAdmin
+            ? 'Every moment created across the school. Open one to see the children inside it.'
+            : 'The moments you have created. Open one to add the children who were part of it.'
         }
+        action={newMomentButton}
       />
 
-      <MomentsGrid
-        endpoint="/moments"
-        emptyTitle="No moments yet"
-        emptyDescription="Capture what students are doing and tag who was involved. One photo can be linked to several children without being uploaded twice."
-        emptyAction={
-          <Button icon={<ImagePlus size={16} />} onClick={() => setAdding(true)}>
-            Add Moment
-          </Button>
-        }
-      />
+      {isLoading ? (
+        <LoadingState rows={4} label="Loading moments" />
+      ) : isError || !data ? (
+        <ErrorState onRetry={() => void refetch()} />
+      ) : data.length === 0 ? (
+        <EmptyState
+          icon={<Sparkles size={26} />}
+          title="No moments yet"
+          description="A moment is a heading, a stretch of dates and a subject — then one entry for each child who was part of it."
+          action={newMomentButton}
+        />
+      ) : (
+        <>
+          {subjects.length > 1 ? (
+            <div className="scroll-x mb-5 flex gap-2 pb-1">
+              <FilterChip active={subjectId === null} onClick={() => setSubjectId(null)}>
+                All
+                <span className="text-ink-3">{data.length}</span>
+              </FilterChip>
+              {subjects.map((subject) => (
+                <FilterChip
+                  key={subject.id}
+                  active={subjectId === subject.id}
+                  token={subject.colorToken}
+                  onClick={() => setSubjectId(subjectId === subject.id ? null : subject.id)}
+                >
+                  <span
+                    className={cn(
+                      'h-2 w-2 shrink-0 rounded-full',
+                      TOKEN_STYLES[asToken(subject.colorToken)].dot,
+                    )}
+                  />
+                  {subject.name}
+                  <span className="text-ink-3">{subject.count}</span>
+                </FilterChip>
+              ))}
+            </div>
+          ) : null}
 
-      {adding ? <AddMomentModal onClose={() => setAdding(false)} /> : null}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((moment) => (
+              <MomentCard key={moment.id} moment={moment} to={`${basePath}/${moment.id}`} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {creating ? (
+        <MomentFormModal
+          onClose={() => setCreating(false)}
+          // Straight into the new moment, because the next thing anyone wants is
+          // to start adding children to it.
+          onCreated={(id) => navigate(`${basePath}/${id}`)}
+        />
+      ) : null}
     </div>
   );
 }
 
-interface UploadTarget {
-  path: string;
-  uploadUrl: string;
-  token: string;
-}
-
-function AddMomentModal({ onClose }: { onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState('');
-  const [caption, setCaption] = useState('');
-  const [studentIds, setStudentIds] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const { data: students } = useQuery({
-    queryKey: ['students'],
-    queryFn: () => get<StudentSummaryDto[]>('/students'),
-  });
-
-  const create = useMutation({
-    mutationFn: async () => {
-      if (!file) throw new Error('Choose a photo or video first.');
-
-      // Media never proxies through the API: we ask for a signed URL, PUT the
-      // bytes straight to storage, then send only the metadata (AD-04).
-      const target = await post<UploadTarget>('/moments/upload-url', {
-        fileName: file.name,
-        mimeType: file.type,
-      });
-
-      const upload = await fetch(target.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
-      if (!upload.ok) throw new Error('The upload did not complete. Please try again.');
-
-      return post('/moments', {
-        title: title.trim(),
-        caption: caption.trim() || undefined,
-        studentIds,
-        media: [{ storagePath: target.path, mimeType: file.type, sizeBytes: file.size }],
-      });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['moments'] });
-      onClose();
-    },
-    onError: (err) => setError(errorMessage(err)),
-  });
-
+function FilterChip({
+  active,
+  token,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  token?: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Add moment"
-      description="One media item can be tagged to several students."
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => create.mutate()}
-            disabled={!file || !title.trim() || studentIds.length === 0 || create.isPending}
-          >
-            {create.isPending ? 'Uploading…' : 'Save Moment'}
-          </Button>
-        </>
-      }
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-medium transition-colors',
+        active
+          ? token
+            ? TOKEN_STYLES[asToken(token)].chip
+            : 'border-violet bg-lavender text-violet'
+          : 'border-line bg-card text-ink-2 hover:bg-lavender-2',
+      )}
     >
-      <div className="flex flex-col gap-4">
-        <Field label="Photo or video" required error={error}>
-          <label className="flex cursor-pointer flex-col items-center gap-2 rounded-[12px] border border-dashed border-line bg-lavender-2 px-4 py-8 text-center">
-            <Upload size={22} className="text-violet" />
-            <span className="text-sm font-medium text-ink">
-              {file ? file.name : 'Choose a photo or video'}
-            </span>
-            <span className="text-xs text-ink-3">Tap to browse</span>
-            <input
-              type="file"
-              accept="image/*,video/*"
-              className="hidden"
-              onChange={(e) => {
-                const chosen = e.target.files?.[0] ?? null;
-                setFile(chosen);
-                if (chosen && !title) setTitle(chosen.name.replace(/\.[^.]+$/, ''));
-              }}
-            />
-          </label>
-        </Field>
-
-        <Field label="Title" htmlFor="moment-title" required>
-          <Input
-            id="moment-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Science Experiment"
-          />
-        </Field>
-
-        <Field label="Caption" htmlFor="moment-caption" hint="Optional. What was happening?">
-          <Textarea
-            id="moment-caption"
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-            placeholder="Exploring how different materials react with water."
-          />
-        </Field>
-
-        <Field label="Who is in this moment?" required>
-          <div className="flex max-h-44 flex-col gap-1 overflow-y-auto rounded-[12px] border border-line p-2">
-            {students?.map((student) => (
-              <label
-                key={student.id}
-                className="touch-target flex cursor-pointer items-center gap-3 rounded-[10px] px-2 hover:bg-lavender-2"
-              >
-                <input
-                  type="checkbox"
-                  checked={studentIds.includes(student.id)}
-                  onChange={(e) =>
-                    setStudentIds(
-                      e.target.checked
-                        ? [...studentIds, student.id]
-                        : studentIds.filter((id) => id !== student.id),
-                    )
-                  }
-                  className="h-4 w-4 accent-[var(--color-violet)]"
-                />
-                <span className="text-sm text-ink">{student.fullName}</span>
-              </label>
-            ))}
-          </div>
-        </Field>
-      </div>
-    </Modal>
+      {children}
+    </button>
   );
 }

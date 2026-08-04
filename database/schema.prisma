@@ -191,6 +191,8 @@ model User {
   authoredLearning    LearningUpdate[]         @relation("LearningUpdateAuthor")
   observedDevelopment DevelopmentObservation[] @relation("DevelopmentObserver")
   createdMoments      Moment[]                 @relation("MomentCreator")
+  createdCollections  MomentCollection[]       @relation("MomentCollectionCreator")
+  createdEntries      MomentEntry[]            @relation("MomentEntryCreator")
   auditEntries        AuditLog[]
   pushSubscriptions   PushSubscription[]
   decidedLeave        TeacherLeaveRequest[]    @relation("LeaveDecider")
@@ -316,6 +318,7 @@ model Student {
   developmentObs   DevelopmentObservation[]
   stageChanges     DevelopmentStageChange[]
   moments          MomentStudent[]
+  momentEntries    MomentEntry[]
   weeklyUpdates    WeeklyUpdate[]
 
   @@index([status])
@@ -339,6 +342,7 @@ model Subject {
   classes          Class[]
   levelCompletions LevelCompletion[]
   moments          Moment[]
+  momentCollections MomentCollection[]
 
   @@map("subjects")
 }
@@ -857,6 +861,74 @@ model MomentStudent {
 
   @@id([momentId, studentId])
   @@map("moment_students")
+}
+
+// ---------------------------------------------------------------------------
+// Moments as a collection — a heading with one entry per child (021)
+//
+// The models above are the flat gallery class records and weekly updates read.
+// These are the shape staff author in: a moment framed by heading, dates and
+// subject, filled in one child at a time.
+// ---------------------------------------------------------------------------
+
+model MomentCollection {
+  id          String   @id @default(uuid()) @db.Uuid
+  heading     String
+  description String?
+  startDate   DateTime @map("start_date") @db.Date
+  endDate     DateTime @map("end_date") @db.Date
+  subjectId   String   @map("subject_id") @db.Uuid
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subject Subject       @relation(fields: [subjectId], references: [id])
+  creator User          @relation("MomentCollectionCreator", fields: [createdBy], references: [id])
+  entries MomentEntry[]
+
+  @@index([createdBy, startDate(sort: Desc)])
+  @@index([subjectId])
+  @@index([startDate(sort: Desc)])
+  @@map("moment_collections")
+}
+
+model MomentEntry {
+  id           String   @id @default(uuid()) @db.Uuid
+  collectionId String   @map("collection_id") @db.Uuid
+  studentId    String   @map("student_id") @db.Uuid
+  title        String
+  description  String?
+  /// Private bucket path, never a URL — reads are signed per request (AD-04).
+  photoPath    String?  @map("photo_path")
+  /// Video lives wherever the school already hosts it; we keep the link only.
+  videoUrl     String?  @map("video_url")
+  createdBy    String   @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  collection MomentCollection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  student    Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  creator    User              @relation("MomentEntryCreator", fields: [createdBy], references: [id])
+  links      MomentEntryLink[]
+
+  // One child, one entry per moment — the rule the form describes by greying a
+  // name out, held here so it is true however the row arrives.
+  @@unique([collectionId, studentId])
+  @@index([studentId])
+  @@map("moment_entries")
+}
+
+model MomentEntryLink {
+  id           String @id @default(uuid()) @db.Uuid
+  entryId      String @map("entry_id") @db.Uuid
+  label        String?
+  url          String
+  displayOrder Int    @default(0) @map("display_order")
+
+  entry MomentEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId, displayOrder])
+  @@map("moment_entry_links")
 }
 
 // ---------------------------------------------------------------------------

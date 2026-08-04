@@ -622,6 +622,85 @@ export const createMomentSchema = z.object({
 });
 export type CreateMomentInput = z.infer<typeof createMomentSchema>;
 
+// --- Moments as a collection ------------------------------------------------
+
+/**
+ * A moment is opened once — heading, why it matters, the period it covers and
+ * the subject it belongs to — and then filled in one child at a time.
+ */
+export const createMomentCollectionSchema = z
+  .object({
+    heading: z.string().trim().min(1, 'Give this moment a heading').max(140),
+    description: z.string().trim().max(2000).optional(),
+    startDate: dateKey,
+    endDate: dateKey,
+    subjectId: uuid,
+  })
+  .refine((v) => v.endDate >= v.startDate, {
+    message: 'The end date cannot be before the start date',
+    path: ['endDate'],
+  });
+export type CreateMomentCollectionInput = z.infer<typeof createMomentCollectionSchema>;
+
+/** The subject is fixed once entries exist, so it is not editable here. */
+export const updateMomentCollectionSchema = z
+  .object({
+    heading: z.string().trim().min(1, 'Give this moment a heading').max(140).optional(),
+    description: z.string().trim().max(2000).nullable().optional(),
+    startDate: dateKey.optional(),
+    endDate: dateKey.optional(),
+    subjectId: uuid.optional(),
+  })
+  .refine((v) => !v.startDate || !v.endDate || v.endDate >= v.startDate, {
+    message: 'The end date cannot be before the start date',
+    path: ['endDate'],
+  });
+
+const momentEntryLink = z.object({
+  label: z.string().trim().max(120).optional(),
+  url: z.string().trim().url('Enter a full link, starting with https://'),
+});
+
+/**
+ * One child's entry. The photo is a storage path the browser has already
+ * uploaded to (AD-04); the video is a link to wherever it is already hosted.
+ * Both are optional on their own, but an entry with neither is just text — so
+ * at least one is required.
+ */
+export const createMomentEntrySchema = z
+  .object({
+    studentId: uuid,
+    title: z.string().trim().min(1, 'Give this entry a title').max(140),
+    description: z.string().trim().max(4000).optional(),
+    photoPath: z.string().trim().min(1).optional(),
+    videoUrl: z.string().trim().url('Enter a full video link, starting with https://').optional(),
+    referenceLinks: z.array(momentEntryLink).max(10).default([]),
+  })
+  .refine((v) => Boolean(v.photoPath || v.videoUrl), {
+    message: 'Add a photo or a video link',
+    path: ['photoPath'],
+  });
+export type CreateMomentEntryInput = z.infer<typeof createMomentEntrySchema>;
+
+/** The child an entry belongs to is settled at creation and never moves. */
+export const updateMomentEntrySchema = z.object({
+  title: z.string().trim().min(1, 'Give this entry a title').max(140).optional(),
+  description: z.string().trim().max(4000).nullable().optional(),
+  photoPath: z.string().trim().min(1).nullable().optional(),
+  videoUrl: z
+    .string()
+    .trim()
+    .url('Enter a full video link, starting with https://')
+    .nullable()
+    .optional(),
+  referenceLinks: z.array(momentEntryLink).max(10).optional(),
+});
+
+export const momentCollectionsQuerySchema = z.object({
+  studentId: uuid.optional(),
+  subjectId: uuid.optional(),
+});
+
 // --- Weekly update (M12) ----------------------------------------------------
 
 export const generateWeeklyUpdateSchema = z.object({

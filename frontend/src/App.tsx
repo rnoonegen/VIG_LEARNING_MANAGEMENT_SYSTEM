@@ -38,6 +38,7 @@ import { ClassRecordPage } from './pages/teacher/ClassRecordPage';
 import { ClassProgressPage } from './pages/teacher/ClassProgressPage';
 
 import { MomentsPage } from './pages/moments/MomentsPage';
+import { MomentDetailPage } from './pages/moments/MomentDetailPage';
 
 import { ParentHomePage } from './pages/parent/ParentHomePage';
 import { ParentLearningPage } from './pages/parent/ParentLearningPage';
@@ -132,7 +133,8 @@ export function App() {
         {/* Accounts moved under Settings. Notifications already sent carry the
             old link, so it keeps working — with the ?reset= id intact. */}
         <Route path="/admin/users" element={<AccountsRedirect />} />
-        <Route path="/admin/moments" element={<MomentsPage />} />
+        <Route path="/admin/moments" element={<MomentsPage basePath="/admin/moments" />} />
+        <Route path="/admin/moments/:momentId" element={<MomentDetailPage backTo="/admin/moments" />} />
       </Route>
 
       {/* --- Teacher --- */}
@@ -150,7 +152,8 @@ export function App() {
         <Route path="/teacher/students/:studentId" element={<StudentProfilePage basePath="/teacher/students" />} />
         <Route path="/teacher/curriculum" element={<TeacherCurriculumPage />} />
         <Route path="/teacher/class/:occurrenceId/progress" element={<ClassProgressPage />} />
-        <Route path="/teacher/moments" element={<MomentsPage />} />
+        <Route path="/teacher/moments" element={<MomentsPage basePath="/teacher/moments" />} />
+        <Route path="/teacher/moments/:momentId" element={<MomentDetailPage backTo="/teacher/moments" />} />
       </Route>
 
       {/* The class-record flow is full-screen: a stepper should not compete
@@ -176,6 +179,7 @@ export function App() {
         <Route path="/parent/learning" element={<ParentLearningPage />} />
         <Route path="/parent/development" element={<ParentDevelopmentPage />} />
         <Route path="/parent/moments" element={<ParentMomentsPage />} />
+        <Route path="/parent/moments/:momentId" element={<MomentDetailPage backTo="/parent/moments" />} />
         <Route path="/parent/weekly-updates/:updateId" element={<WeeklyUpdatePage />} />
       </Route>
 

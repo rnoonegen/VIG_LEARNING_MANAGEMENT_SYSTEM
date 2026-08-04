@@ -725,6 +725,68 @@ export interface MomentDto {
   media: Array<{ id: string; url: string; mimeType: string; isVideo: boolean }>;
 }
 
+// --- Moments as a collection ------------------------------------------------
+
+export interface MomentEntryLinkDto {
+  id: string;
+  label: string | null;
+  url: string;
+}
+
+/** One child's place inside a moment. */
+export interface MomentEntryDto {
+  id: string;
+  student: { id: string; fullName: string; avatarUrl: string | null };
+  title: string;
+  description: string | null;
+  /** Short-lived signed URL, issued only after the caller's access was checked. */
+  photoUrl: string | null;
+  videoUrl: string | null;
+  referenceLinks: MomentEntryLinkDto[];
+  createdByName: string;
+  createdAt: string;
+}
+
+/** A moment in a list: enough to recognise it without loading every entry. */
+export interface MomentCollectionDto {
+  id: string;
+  heading: string;
+  description: string | null;
+  startDate: string;
+  endDate: string;
+  subject: { id: string; name: string; colorToken: string };
+  createdBy: { id: string; name: string };
+  /** True when the signed-in user may add to, edit or remove this moment. */
+  canManage: boolean;
+  entryCount: number;
+  /** First few photos, for the cover mosaic. */
+  previewPhotoUrls: string[];
+  /** First names of the children inside, for the summary line. */
+  studentNames: string[];
+  createdAt: string;
+}
+
+export interface MomentCollectionDetailDto extends MomentCollectionDto {
+  entries: MomentEntryDto[];
+}
+
+/** A child who may still be added to a moment, plus why they cannot. */
+export interface MomentStudentOptionDto {
+  id: string;
+  fullName: string;
+  avatarUrl: string | null;
+  gradeLabel: string | null;
+  /** Set when the child already has an entry in this moment. */
+  takenByEntryId: string | null;
+}
+
+/** The subjects this caller may file a moment under. */
+export interface MomentSubjectOptionDto {
+  id: string;
+  name: string;
+  colorToken: string;
+}
+
 // --- Parent -----------------------------------------------------------------
 
 /**

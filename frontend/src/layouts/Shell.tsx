@@ -39,6 +39,8 @@ export const ADMIN_NAV: NavItem[] = [
   { to: '/admin/parents', label: 'Parents', icon: <HeartHandshake size={ICON_SIZE} /> },
   { to: '/admin/curriculum', label: 'Curriculum', icon: <BookOpen size={ICON_SIZE} /> },
   { to: '/admin/teachers', label: 'Teachers', icon: <GraduationCap size={ICON_SIZE} /> },
+  // Every moment in the school, whoever created it.
+  { to: '/admin/moments', label: 'Moments', icon: <Image size={ICON_SIZE} /> },
 ];
 
 export const TEACHER_NAV: NavItem[] = [
@@ -210,7 +212,15 @@ export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: str
         </div>
       </div>
 
-      {/* Mobile bottom navigation */}
+      {/*
+        Mobile bottom navigation.
+
+        Cells set their height rather than using `touch-target`, whose 44px
+        min-width multiplied by eight destinations exceeds a 320px screen and
+        pushes the whole page sideways — which the design system does not allow
+        (§11). The 44px hit height stays, and adjacent cells leave no dead space
+        between them, so a narrower cell is still comfortably tappable.
+      */}
       <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
         {nav.map((item) => (
           <NavLink
@@ -219,26 +229,26 @@ export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: str
             end={item.end}
             className={({ isActive }) =>
               cn(
-                'touch-target flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium',
+                'flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 py-2 text-[10px] font-medium',
                 isActive ? 'text-violet' : 'text-ink-3',
               )
             }
           >
             {item.icon}
-            {item.label}
+            <span className="max-w-full truncate">{item.label}</span>
           </NavLink>
         ))}
         <NavLink
           to={settingsPath}
           className={({ isActive }) =>
             cn(
-              'touch-target flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium',
+              'flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 py-2 text-[10px] font-medium',
               isActive ? 'text-violet' : 'text-ink-3',
             )
           }
         >
           <Settings size={ICON_SIZE} />
-          More
+          <span className="max-w-full truncate">More</span>
         </NavLink>
       </nav>
     </div>
