@@ -447,7 +447,6 @@ export interface StudentDto extends StudentSummaryDto {
   dateOfBirth: string | null;
   joinedAt: string | null;
   notes: string | null;
-  availability: AvailabilitySlotDto[];
   parents: Array<{
     parentId: string;
     userId: string;
@@ -456,7 +455,7 @@ export interface StudentDto extends StudentSummaryDto {
     username: string;
     relationship: string | null;
   }>;
-  /** True once the student has subjects, a level per subject and availability. */
+  /** True once the student has subjects and a level in each. */
   setupComplete: boolean;
 }
 

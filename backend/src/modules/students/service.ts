@@ -25,7 +25,6 @@ const studentInclude = {
     // Curriculum order, so a subject does not move between reads.
     orderBy: { subject: { displayOrder: 'asc' } },
   },
-  availability: { orderBy: [{ weekday: 'asc' }, { startTime: 'asc' }] },
   parents: { include: { parent: { include: { user: true } } } },
 } satisfies Prisma.StudentInclude;
 
@@ -137,12 +136,6 @@ export async function getStudent(studentId: string): Promise<StudentDto> {
     dateOfBirth: student.dateOfBirth?.toISOString().slice(0, 10) ?? null,
     joinedAt: student.joinedAt?.toISOString().slice(0, 10) ?? null,
     notes: student.notes,
-    availability: student.availability.map((a) => ({
-      id: a.id,
-      weekday: a.weekday,
-      startTime: a.startTime,
-      endTime: a.endTime,
-    })),
     parents: student.parents.map((p) => ({
       parentId: p.parentId,
       userId: p.parent.userId,
@@ -150,7 +143,9 @@ export async function getStudent(studentId: string): Promise<StudentDto> {
       username: p.parent.user.username,
       relationship: p.relationship,
     })),
-    setupComplete: student.subjectLevels.length > 0 && student.availability.length > 0,
+    // Subjects and a level in each are the whole of setup now: a child no longer
+    // states when they can attend, so there is nothing else to wait for.
+    setupComplete: student.subjectLevels.length > 0,
   };
 }
 
@@ -217,12 +212,6 @@ export async function createStudent(input: CreateStudentInput, actorId: string) 
           levelId: sl.levelId,
           isCurrent: true,
         })),
-      });
-    }
-
-    if (input.availability.length) {
-      await tx.studentAvailability.createMany({
-        data: input.availability.map((a) => ({ ...a, studentId: created.id })),
       });
     }
 
@@ -373,22 +362,6 @@ export async function putSubjectLevels(
   });
 
   await audit({ actorId, action: 'STUDENT_LEVELS_SET', entity: 'Student', entityId: studentId });
-  return getStudent(studentId);
-}
-
-export async function putAvailability(
-  studentId: string,
-  slots: Array<{ weekday: number; startTime: string; endTime: string }>,
-  actorId: string,
-) {
-  await prisma.$transaction(async (tx) => {
-    await tx.studentAvailability.deleteMany({ where: { studentId } });
-    if (slots.length) {
-      await tx.studentAvailability.createMany({ data: slots.map((s) => ({ ...s, studentId })) });
-    }
-  });
-
-  await audit({ actorId, action: 'STUDENT_AVAILABILITY_SET', entity: 'Student', entityId: studentId });
   return getStudent(studentId);
 }
 

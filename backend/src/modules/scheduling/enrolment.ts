@@ -1,5 +1,6 @@
-import { toHHMM } from '@vig/shared';
-import { isAvailableFor, type RecurringSlot } from './availability.js';
+/**
+ * Whether a child can join a class that already exists.
+ */
 
 /**
  * Whether a child can join a class that already exists.
@@ -12,6 +13,10 @@ import { isAvailableFor, type RecurringSlot } from './availability.js';
  * Blockers are things that would corrupt the record or are physically
  * impossible. Warnings are things the school may legitimately choose to accept;
  * Needs Attention keeps reporting them either way.
+ *
+ * A child's own weekly availability used to raise a warning here. The school
+ * does not record one, so the only timing question left is the hard one: are
+ * they already somewhere else.
  */
 
 export interface JoinCheckInput {
@@ -20,7 +25,6 @@ export interface JoinCheckInput {
   klass: { subjectName: string; levelId: string; levelName: string };
   /** The student's current level in that subject, or null if they do not study it. */
   current: { levelId: string; levelName: string } | null;
-  studentAvailability: RecurringSlot[];
   /** Upcoming occurrences of the class the student would inherit. */
   occurrences: Array<{ start: Date; end: Date }>;
   /** Occurrences the student is already booked into, excluding this class. */
@@ -30,13 +34,6 @@ export interface JoinCheckInput {
 export interface JoinCheck {
   blockers: string[];
   warnings: string[];
-}
-
-function windowOf(start: Date, end: Date) {
-  return {
-    startTime: toHHMM(start.getUTCHours() * 60 + start.getUTCMinutes()),
-    endTime: toHHMM(end.getUTCHours() * 60 + end.getUTCMinutes()),
-  };
 }
 
 export function checkJoin(input: JoinCheckInput): JoinCheck {
@@ -65,23 +62,6 @@ export function checkJoin(input: JoinCheckInput): JoinCheck {
       `${input.studentName} is already booked for another class at this time (${clashes.length} ${
         clashes.length === 1 ? 'date' : 'dates'
       }).`,
-    );
-  }
-
-  // 3 — Outside their stated availability is a decision for the school, not a
-  //     hard stop: the same case already surfaces on Admin Home.
-  const outside = input.occurrences.filter((o) => {
-    const date = new Date(o.start);
-    date.setUTCHours(0, 0, 0, 0);
-    // Students have no dated exceptions in the model, so the weekly pattern is
-    // the whole story here.
-    return !isAvailableFor(input.studentAvailability, [], date, windowOf(o.start, o.end));
-  });
-  if (outside.length > 0) {
-    warnings.push(
-      `This class falls outside ${input.studentName}'s weekly availability on ${outside.length} ${
-        outside.length === 1 ? 'date' : 'dates'
-      }.`,
     );
   }
 

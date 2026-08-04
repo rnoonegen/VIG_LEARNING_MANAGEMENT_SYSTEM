@@ -82,7 +82,7 @@ async function loadSnapshot(
     }),
     prisma.student.findMany({
       where: { id: { in: studentIds } },
-      include: { availability: true },
+      select: { id: true, fullName: true },
     }),
     prisma.classOccurrence.findMany({
       where: {
@@ -107,11 +107,7 @@ async function loadSnapshot(
       availability: t.availability,
       exceptions: t.exceptions,
     })),
-    students: students.map((s) => ({
-      studentId: s.id,
-      fullName: s.fullName,
-      availability: s.availability,
-    })),
+    students: students.map((s) => ({ studentId: s.id, fullName: s.fullName })),
     booked: booked.map((o) => ({
       teacherId: o.teacherId,
       studentIds: o.class.students.map((cs) => cs.studentId),
@@ -315,7 +311,6 @@ async function joinContext(classId: string, studentIds: string[]) {
     prisma.student.findMany({
       where: { id: { in: studentIds } },
       include: {
-        availability: true,
         subjectLevels: { where: { isCurrent: true }, include: { level: true } },
       },
     }),
@@ -349,7 +344,6 @@ function evaluateJoin(
   klass: { subject: { name: string }; levelId: string; level: { name: string } },
   student: {
     fullName: string;
-    availability: Array<{ weekday: number; startTime: string; endTime: string }>;
     subjectLevels: Array<{ subjectId: string; levelId: string; level: { name: string } }>;
   },
   subjectId: string,
@@ -362,7 +356,6 @@ function evaluateJoin(
     studentName: student.fullName,
     klass: { subjectName: klass.subject.name, levelId: klass.levelId, levelName: klass.level.name },
     current: current ? { levelId: current.levelId, levelName: current.level.name } : null,
-    studentAvailability: student.availability,
     occurrences: occurrences.map((o) => ({ start: o.scheduledStart, end: o.scheduledEnd })),
     booked: booked.map((b) => ({ start: b.scheduledStart, end: b.scheduledEnd })),
   });
@@ -522,7 +515,6 @@ export async function getStudentTeaching(studentId: string): Promise<StudentTeac
   const student = await prisma.student.findUnique({
     where: { id: studentId },
     include: {
-      availability: true,
       subjectLevels: {
         where: { isCurrent: true },
         include: { subject: true, level: true },

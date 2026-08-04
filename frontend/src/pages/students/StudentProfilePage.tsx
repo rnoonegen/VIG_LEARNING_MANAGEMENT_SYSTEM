@@ -21,7 +21,6 @@ import { Field, Input, Textarea } from '@/components/ui/Field';
 import { LearningMap } from '@/components/LearningMap';
 import { DevelopmentPanel } from '@/components/DevelopmentPanel';
 import { MomentsGrid } from '@/components/MomentsGrid';
-import { AvailabilityGrid, fromDayRows, toDayRows, type DayAvailability } from '@/components/AvailabilityGrid';
 import { SubjectLevelEditor, type SubjectLevelDraft } from '@/components/SubjectLevelEditor';
 
 type Tab = 'overview' | 'classes' | 'learning' | 'development' | 'moments' | 'history';
@@ -127,24 +126,6 @@ function Overview({ student, canManage }: { student: StudentDto; canManage?: boo
               A subject added to the curriculum later can be assigned here from Manage Student → Subjects.
             </p>
           ) : null}
-        </Card>
-      </Section>
-
-      <Section title="Weekly availability">
-        <Card>
-          {student.availability.length === 0 ? (
-            <p className="text-sm text-warning">No availability set. Scheduling has nothing to work with.</p>
-          ) : (
-            <dl>
-              {student.availability.map((slot) => (
-                <DetailRow
-                  key={slot.id}
-                  label={WEEKDAY_SHORT[slot.weekday]!}
-                  value={`${slot.startTime} – ${slot.endTime}`}
-                />
-              ))}
-            </dl>
-          )}
         </Card>
       </Section>
 
@@ -344,7 +325,7 @@ function Teaching({ student, canManage }: { student: StudentDto; canManage?: boo
           open
           onClose={() => setConfirming(null)}
           title="Add anyway?"
-          description={`${confirming.teacherName}'s class does not fit this child's stated availability.`}
+          description={`Adding this child to ${confirming.teacherName}'s class raises something worth checking first.`}
           footer={
             <>
               <Button variant="secondary" onClick={() => setConfirming(null)}>
@@ -365,8 +346,7 @@ function Teaching({ student, canManage }: { student: StudentDto; canManage?: boo
             ))}
           </ul>
           <p className="mt-3 text-xs text-ink-2">
-            You can add them regardless — Admin Home will keep flagging the mismatch until their
-            availability covers the class or the class moves.
+            You can add them regardless — Admin Home will keep flagging it until it is resolved.
           </p>
         </Modal>
       ) : null}
@@ -461,7 +441,7 @@ function History({ studentId }: { studentId: string }) {
 // Manage Student
 // ---------------------------------------------------------------------------
 
-type ManageTab = 'details' | 'subjects' | 'availability' | 'parent' | 'status';
+type ManageTab = 'details' | 'subjects' | 'parent' | 'status';
 
 /**
  * Configuration lives here, deliberately separate from the read-only profile.
@@ -492,7 +472,6 @@ function ManageStudentModal({ student, onClose }: { student: StudentDto; onClose
         tabs={[
           { key: 'details', label: 'Details' },
           { key: 'subjects', label: 'Subjects', count: student.subjectLevels.length },
-          { key: 'availability', label: 'Availability', count: student.availability.length },
           { key: 'parent', label: 'Parent', count: student.parents.length },
           { key: 'status', label: 'Status' },
         ]}
@@ -500,7 +479,6 @@ function ManageStudentModal({ student, onClose }: { student: StudentDto; onClose
 
       {tab === 'details' ? <DetailsPanel student={student} /> : null}
       {tab === 'subjects' ? <SubjectsPanel student={student} /> : null}
-      {tab === 'availability' ? <AvailabilityPanel student={student} /> : null}
       {tab === 'parent' ? <ParentPanel student={student} /> : null}
       {tab === 'status' ? <StatusPanel student={student} /> : null}
     </Modal>
@@ -736,42 +714,6 @@ function SubjectsPanel({ student }: { student: StudentDto }) {
         disabled={incomplete}
         error={error ?? (incomplete ? 'Choose a level for every subject.' : null)}
       />
-    </>
-  );
-}
-
-function AvailabilityPanel({ student }: { student: StudentDto }) {
-  const refresh = useStudentRefresh(student.id);
-  const [rows, setRows] = useState<DayAvailability[]>(toDayRows(student.availability));
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const save = useMutation({
-    mutationFn: () => put(`/students/${student.id}/availability`, { slots: fromDayRows(rows) }),
-    onSuccess: async () => {
-      await refresh();
-      setSaved(true);
-      setError(null);
-    },
-    onError: (err) => setError(errorMessage(err)),
-  });
-
-  return (
-    <>
-      <CardHeader
-        title="Weekly availability"
-        description="When this child can attend classes. Scheduling treats anything outside these windows as invalid."
-      />
-
-      <AvailabilityGrid
-        rows={rows}
-        onChange={(next) => {
-          setRows(next);
-          setSaved(false);
-        }}
-      />
-
-      <SaveRow onSave={() => save.mutate()} pending={save.isPending} saved={saved} error={error} />
     </>
   );
 }

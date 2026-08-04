@@ -20,10 +20,9 @@ type Step = (typeof STEPS)[number];
 /**
  * Enrolling a child (F6): who they are, then what they study.
  *
- * Weekly availability and parent access were once steps here. They are set from
- * the student's profile and the Parents page instead, so enrolment stays short —
- * anything still missing is reported on Admin Home rather than blocking the
- * admin at the point of adding a child.
+ * Parent access was once a step here. It is set from the Parents page instead,
+ * so enrolment stays short — anything still missing is reported on Admin Home
+ * rather than blocking the admin at the point of adding a child.
  */
 export function AddStudentPage() {
   const navigate = useNavigate();
@@ -165,8 +164,7 @@ export function AddStudentPage() {
             <SubjectLevelEditor subjects={subjects ?? []} value={subjectLevels} onChange={setSubjectLevels} />
 
             <p className="mt-4 rounded-[12px] bg-lavender-2 px-3 py-2.5 text-xs text-ink-2">
-              Weekly availability and parent access are set afterwards — availability from this child's
-              profile, parent access from the Parents page.
+              Parent access is set afterwards, from the Parents page.
             </p>
 
             {error ? <p className="mt-3 text-xs text-danger">{error}</p> : null}

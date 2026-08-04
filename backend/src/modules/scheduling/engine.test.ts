@@ -73,13 +73,13 @@ const REQUEST: SlotRequest = {
 };
 
 describe('findValidSlots — the happy path', () => {
-  it('returns ranked options inside the availability intersection', () => {
+  it('returns ranked options inside the teacher’s availability', () => {
     const options = findValidSlots(REQUEST, snapshot());
 
     expect(options.length).toBeGreaterThan(0);
     for (const option of options) {
-      // The intersection is 09:00–14:30; a 60-minute class must fit inside it.
-      expect(option.startTime >= '09:00').toBe(true);
+      // Priya is free 08:30–14:30; a 60-minute class must fit inside that.
+      expect(option.startTime >= '08:30').toBe(true);
       expect(option.endTime <= '14:30').toBe(true);
       expect(option.daysOfWeek).toHaveLength(2);
       expect(option.teacherId).toBe('teacher-priya');
@@ -132,54 +132,37 @@ describe('findValidSlots — capability filter', () => {
   });
 });
 
-describe('findValidSlots — availability intersection', () => {
-  it('returns nothing when teacher and student never overlap', () => {
-    const nightOwl = aarav({
-      availability: MON_TO_FRI.map((weekday) => ({
-        weekday,
-        startTime: '16:00',
-        endTime: '19:00',
-      })),
-    });
-    expect(findValidSlots(REQUEST, snapshot({ students: [nightOwl] }))).toEqual([]);
+describe('findValidSlots — the teacher is the only diary', () => {
+  it('offers nothing when the teacher has no window that day', () => {
+    const mondayOnly = priya({ availability: [{ weekday: 1, startTime: '09:00', endTime: '12:00' }] });
+    const options = findValidSlots(
+      { ...REQUEST, timesPerWeek: 1, timePreference: 'ANY' },
+      snapshot({ teachers: [mondayOnly] }),
+    );
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.every((o) => o.daysOfWeek.every((d) => d === 1))).toBe(true);
   });
 
-  it('will not place a class that does not fit inside the shared window', () => {
-    // Shared window is 09:00–10:00; a 90-minute class cannot fit.
-    const narrowTeacher = priya({
-      availability: [{ weekday: 1, startTime: '09:00', endTime: '10:00' }],
-    });
-    const narrowStudent = aarav({
-      availability: [{ weekday: 1, startTime: '09:00', endTime: '10:00' }],
-    });
+  it('will not place a class that does not fit inside the window', () => {
+    // 09:00–10:00 is an hour; a 90-minute class cannot fit in it.
+    const narrow = priya({ availability: [{ weekday: 1, startTime: '09:00', endTime: '10:00' }] });
     const options = findValidSlots(
       { ...REQUEST, timesPerWeek: 1, durationMinutes: 90 },
-      snapshot({ teachers: [narrowTeacher], students: [narrowStudent] }),
+      snapshot({ teachers: [narrow] }),
     );
     expect(options).toEqual([]);
   });
 
-  it('narrows to the intersection across every student in a group class', () => {
-    const diya = aarav({
-      studentId: 'student-diya',
-      fullName: 'Diya Rao',
-      availability: MON_TO_FRI.map((weekday) => ({
-        weekday,
-        startTime: '11:00',
-        endTime: '13:00',
-      })),
-    });
-    const options = findValidSlots(
-      { ...REQUEST, studentIds: ['student-aarav', 'student-diya'], timePreference: 'ANY' },
+  it('a group class is not narrowed by who is in it', () => {
+    // Students carry no availability, so adding one cannot remove an option.
+    const diya = aarav({ studentId: 'student-diya', fullName: 'Diya Rao' });
+    const alone = findValidSlots(REQUEST, snapshot({ students: [aarav()] }));
+    const together = findValidSlots(
+      { ...REQUEST, studentIds: ['student-aarav', 'student-diya'] },
       snapshot({ students: [aarav(), diya] }),
     );
 
-    expect(options.length).toBeGreaterThan(0);
-    // Aarav 09:00–15:00 ∩ Diya 11:00–13:00 ∩ Priya 08:30–14:30 = 11:00–13:00.
-    for (const option of options) {
-      expect(option.startTime >= '11:00').toBe(true);
-      expect(option.endTime <= '13:00').toBe(true);
-    }
+    expect(together.length).toBe(alone.length);
   });
 
   it('returns nothing when a requested student is missing from the snapshot', () => {
@@ -271,14 +254,22 @@ describe('validateMove', () => {
     expect(result.reason).toMatch(/teacher is not available/i);
   });
 
-  it('rejects a move outside the student’s availability', () => {
-    // 08:30 suits Priya but Aarav only starts at 09:00.
+  it('accepts a move the teacher is free for, whatever the hour suits the child', () => {
+    // 08:30 is inside Priya's 08:30–14:30. A child has no diary to contradict it.
     const result = validateMove(
       { ...base, start: new Date('2026-08-03T08:30:00.000Z') },
       snapshot(),
     );
+    expect(result.valid).toBe(true);
+  });
+
+  it('still rejects a move for a student who does not exist', () => {
+    const result = validateMove(
+      { ...base, studentIds: ['student-ghost'], start: new Date('2026-08-03T10:00:00.000Z') },
+      snapshot(),
+    );
     expect(result.valid).toBe(false);
-    expect(result.reason).toMatch(/not available/i);
+    expect(result.reason).toMatch(/student not found/i);
   });
 
   it('rejects a move that clashes with another booking', () => {
@@ -367,13 +358,9 @@ describe('diagnoseNoOptions', () => {
     expect(reasons[0]).toMatch(/No teacher is assigned to teach science at L1/i);
   });
 
-  it('names the student whose availability is missing', () => {
-    const reasons = diagnoseNoOptions(
-      REQUEST,
-      snapshot({ students: [aarav({ availability: [] })] }),
-      LABELS,
-    );
-    expect(reasons[0]).toMatch(/Aarav Sharma has no weekly availability set/i);
+  it('never blames a student for availability, because they have none', () => {
+    const reasons = diagnoseNoOptions(REQUEST, snapshot({ students: [aarav()] }), LABELS);
+    expect(reasons.join(' ')).not.toMatch(/Aarav Sharma has no weekly availability/i);
   });
 
   it('names the teacher whose availability is missing', () => {
@@ -381,26 +368,24 @@ describe('diagnoseNoOptions', () => {
     expect(reasons[0]).toMatch(/Priya Sharma has no weekly availability set/i);
   });
 
-  it('reports a total lack of overlap', () => {
-    // Priya mornings, Aarav evenings: both available, never together.
+  it('reports a window too short to hold the class', () => {
+    // Priya is free for half an hour; the request asks for an hour.
     const reasons = diagnoseNoOptions(
       REQUEST,
       snapshot({
-        teachers: [priya({ availability: [{ weekday: 1, startTime: '08:00', endTime: '10:00' }] })],
-        students: [aarav({ availability: [{ weekday: 1, startTime: '16:00', endTime: '18:00' }] })],
+        teachers: [priya({ availability: [{ weekday: 1, startTime: '08:00', endTime: '08:30' }] })],
       }),
       LABELS,
     );
-    expect(reasons[0]).toMatch(/no 60-minute window/i);
+    expect(reasons[0]).toMatch(/no 60-minute window free/i);
   });
 
-  it('reports too few shared days for the requested frequency', () => {
-    // They overlap on Monday only, but the request asks for twice a week.
+  it('reports too few days for the requested frequency', () => {
+    // Monday only, but the request asks for twice a week.
     const reasons = diagnoseNoOptions(
       REQUEST,
       snapshot({
         teachers: [priya({ availability: [{ weekday: 1, startTime: '09:00', endTime: '12:00' }] })],
-        students: [aarav({ availability: [{ weekday: 1, startTime: '09:00', endTime: '12:00' }] })],
       }),
       LABELS,
     );

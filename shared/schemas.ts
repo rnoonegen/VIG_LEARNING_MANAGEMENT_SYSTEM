@@ -347,8 +347,11 @@ export const subjectLevelSchema = z.object({
 
 /**
  * Adding a child collects who they are and what they study — nothing else.
- * Availability and parent access are set from the profile afterwards, so
- * enrolling is two short steps rather than a five-step wizard.
+ * Parent access is set from the profile afterwards, so enrolling is two short
+ * steps rather than a five-step wizard.
+ *
+ * A child has no weekly availability. Scheduling reads the teacher's diary
+ * only; see the note at the top of the scheduling engine.
  */
 export const createStudentSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
@@ -359,7 +362,6 @@ export const createStudentSchema = z.object({
   /** Uploaded straight to the private bucket first; only the path arrives here. */
   avatarPath: z.string().min(1).optional(),
   subjectLevels: z.array(subjectLevelSchema).default([]),
-  availability: z.array(availabilitySlotSchema).default([]),
   parent: z
     .object({
       // Either link an existing parent account, or create one inline.

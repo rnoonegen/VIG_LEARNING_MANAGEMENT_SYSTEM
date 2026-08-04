@@ -1,7 +1,7 @@
 import type { AttentionIssueDto } from '@vig/shared';
-import { formatShortDate, formatInstantTime, toHHMM, toMinutes } from '@vig/shared';
+import { formatShortDate, formatInstantTime, toHHMM } from '@vig/shared';
 import { prisma } from '../../prisma.js';
-import { isAvailableFor, resolveAvailability } from '../scheduling/availability.js';
+import { isAvailableFor } from '../scheduling/availability.js';
 import { recordWindowState } from '../classrecord/window.js';
 
 /**
@@ -89,7 +89,7 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
         class: {
           include: {
             subject: true,
-            students: { include: { student: { include: { availability: true } } } },
+            students: { include: { student: { select: { id: true, fullName: true } } } },
           },
         },
         teacher: { include: { user: { select: { fullName: true } }, availability: true, exceptions: true } },
@@ -100,7 +100,6 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
       where: { status: 'ACTIVE' },
       include: {
         subjectLevels: { where: { isCurrent: true }, include: { subject: true } },
-        availability: true,
         // Which subjects somebody is actually teaching them — an assignment with
         // no class means the child is studying it on paper only.
         classes: { include: { class: { select: { subjectId: true, status: true } } } },
@@ -163,42 +162,11 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
     );
   }
 
-  // --- 2. Student unavailable for a class already scheduled -----------------
-  for (const o of upcoming) {
-    const date = dayOf(o.scheduledStart);
-    const window = windowOf(o.scheduledStart, o.scheduledEnd);
-
-    for (const cs of o.class.students) {
-      const windows = resolveAvailability(cs.student.availability, [], date);
-      const fits = windows.some(
-        (w) =>
-          toMinutes(w.startTime) <= toMinutes(window.startTime) &&
-          toMinutes(w.endTime) >= toMinutes(window.endTime),
-      );
-      if (fits) continue;
-
-      push(
-        {
-          groupKey: `STUDENT_UNAVAILABLE:${cs.studentId}`,
-          type: 'STUDENT_UNAVAILABLE',
-          title: `${cs.student.fullName} is scheduled outside their availability`,
-          detail: 'Their weekly availability does not cover these classes.',
-          severity: 'warning',
-          actionLabel: 'Review',
-          actionHref: `/admin/students/${cs.studentId}`,
-          affected: [],
-        },
-        {
-          id: o.id,
-          label: o.class.subject.name,
-          sublabel: `${formatShortDate(o.scheduledStart)} · ${formatInstantTime(o.scheduledStart)}`,
-          href: `/admin/students/${cs.studentId}`,
-        },
-      );
-    }
-  }
-
-  // --- 3. Double bookings ---------------------------------------------------
+  // --- 2. Double bookings ---------------------------------------------------
+  //
+  // "Student scheduled outside their availability" used to sit here. A child no
+  // longer states when they can attend, so the only timing problem left that
+  // concerns them is being in two places at once, immediately below.
   for (let i = 0; i < upcoming.length; i += 1) {
     for (let j = i + 1; j < upcoming.length; j += 1) {
       const a = upcoming[i]!;
@@ -236,11 +204,10 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
     }
   }
 
-  // --- 4. Incomplete student setup ------------------------------------------
+  // --- 3. Incomplete student setup ------------------------------------------
   for (const s of students) {
     const missing: string[] = [];
     if (s.subjectLevels.length === 0) missing.push('subject levels');
-    if (s.availability.length === 0) missing.push('weekly availability');
 
     // A subject added to a child after enrolment is easy to leave stranded: it
     // shows on their profile and in the parent portal, but no teacher ever sees
@@ -269,7 +236,7 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
     });
   }
 
-  // --- 5. Class records: still due, versus missed for good -------------------
+  // --- 4. Class records: still due, versus missed for good -------------------
   //
   // These need different responses. An outstanding record can still be written
   // by the teacher; a missed one cannot — the deadline passed, the class is
@@ -308,7 +275,7 @@ export async function computeAttention(): Promise<AttentionIssueDto[]> {
     );
   }
 
-  // --- 6. Password reset requests (AD-09) -----------------------------------
+  // --- 5. Password reset requests (AD-09) -----------------------------------
   const seenResetUsers = new Set<string>();
   for (const n of resetRequests) {
     const payload = n.payload as { userId?: string; username?: string } | null;

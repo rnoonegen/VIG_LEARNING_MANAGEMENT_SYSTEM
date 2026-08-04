@@ -96,7 +96,8 @@ export type AiWorkflow = (typeof AI_WORKFLOWS)[number];
 
 export const ATTENTION_TYPES = [
   'TEACHER_UNAVAILABLE',
-  'STUDENT_UNAVAILABLE',
+  // 'STUDENT_UNAVAILABLE' was here. A child no longer states when they can
+  // attend, so nothing can be scheduled outside a window they do not have.
   'SCHEDULE_CONFLICT',
   'INCOMPLETE_STUDENT_SETUP',
   'CLASS_RECORD_OVERDUE',

@@ -4,11 +4,10 @@ import { checkJoin, type JoinCheckInput } from './enrolment.js';
 /**
  * Joining an existing class.
  *
- * The distinction under test is which failures are refusals and which are the
- * school's call: a level mismatch silently records a child's work where nobody
- * can see it, and being in two classes at once is impossible — but a class
- * outside their stated availability is a decision, and Needs Attention already
- * reports it either way.
+ * What is under test is which failures are refusals: a level mismatch silently
+ * records a child's work where nobody can see it, and being in two classes at
+ * once is impossible. A child's own weekly availability is not consulted — the
+ * school does not record one.
  */
 
 /** Monday 2026-03-02, 09:00–10:00 UTC. */
@@ -19,8 +18,6 @@ function input(overrides: Partial<JoinCheckInput> = {}): JoinCheckInput {
     studentName: 'Aarav',
     klass: { subjectName: 'Sanskrit', levelId: 'level-1', levelName: 'Level 1' },
     current: { levelId: 'level-1', levelName: 'Level 1' },
-    // Monday 08:00–15:00, which covers the class.
-    studentAvailability: [{ weekday: 1, startTime: '08:00', endTime: '15:00' }],
     occurrences: [MONDAY_9AM],
     booked: [],
     ...overrides,
@@ -63,29 +60,24 @@ describe('checkJoin', () => {
     expect(result.blockers).toEqual([]);
   });
 
-  it('warns rather than refuses when the class sits outside their availability', () => {
-    const result = checkJoin(input({ studentAvailability: [{ weekday: 1, startTime: '13:00', endTime: '15:00' }] }));
-    expect(result.blockers).toEqual([]);
-    expect(result.warnings[0]).toMatch(/outside Aarav's weekly availability/i);
+  it('says nothing about the hour of the class, whatever it is', () => {
+    // An evening class on a weekday: once the child's own diary is gone, the
+    // only timing question left is whether they are already somewhere else.
+    const evening = {
+      start: new Date('2026-03-02T18:00:00.000Z'),
+      end: new Date('2026-03-02T19:00:00.000Z'),
+    };
+    const result = checkJoin(input({ occurrences: [evening] }));
+    expect(result).toEqual({ blockers: [], warnings: [] });
   });
 
-  it('warns when a child has no availability on that weekday at all', () => {
-    const result = checkJoin(input({ studentAvailability: [{ weekday: 2, startTime: '08:00', endTime: '15:00' }] }));
-    expect(result.blockers).toEqual([]);
-    expect(result.warnings).toHaveLength(1);
-  });
-
-  it('counts every affected date, not just the first', () => {
-    const result = checkJoin(
-      input({
-        studentAvailability: [],
-        occurrences: [
-          MONDAY_9AM,
-          { start: new Date('2026-03-09T09:00:00.000Z'), end: new Date('2026-03-09T10:00:00.000Z') },
-        ],
-      }),
-    );
-    expect(result.warnings[0]).toMatch(/2 dates/);
+  it('still catches a clash on the second date, not just the first', () => {
+    const second = {
+      start: new Date('2026-03-09T09:00:00.000Z'),
+      end: new Date('2026-03-09T10:00:00.000Z'),
+    };
+    const result = checkJoin(input({ occurrences: [MONDAY_9AM, second], booked: [second] }));
+    expect(result.blockers[0]).toMatch(/already booked/i);
   });
 
   it('reports a level mismatch and a clash together rather than stopping at the first', () => {

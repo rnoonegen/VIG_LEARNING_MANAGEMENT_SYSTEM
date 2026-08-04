@@ -2,7 +2,6 @@ import { Router } from 'express';
 import {
   avatarUploadUrlSchema,
   createStudentSchema,
-  putAvailabilitySchema,
   putParentAccessSchema,
   putSubjectLevelsSchema,
   setAvatarSchema,
@@ -104,15 +103,6 @@ studentsRouter.put(
   validateBody(putSubjectLevelsSchema),
   handler(async (req, res) =>
     ok(res, await service.putSubjectLevels(req.params.id, req.body.subjectLevels, auth(req).userId)),
-  ),
-);
-
-studentsRouter.put(
-  '/:id/availability',
-  adminOnly,
-  validateBody(putAvailabilitySchema),
-  handler(async (req, res) =>
-    ok(res, await service.putAvailability(req.params.id, req.body.slots, auth(req).userId)),
   ),
 );
 

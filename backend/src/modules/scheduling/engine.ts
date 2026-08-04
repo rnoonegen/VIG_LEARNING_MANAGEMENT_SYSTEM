@@ -14,9 +14,14 @@ import {
  * ranked options. That makes it unit-testable, deterministic, and reusable for
  * both "find me options" and "is this proposed move still valid?".
  *
- * Schedule validity = teacher capability ∧ teacher availability ∧ student
- * availability ∧ no conflict, with dated exceptions overriding recurring
- * availability on their date (BR-06).
+ * Schedule validity = teacher capability ∧ teacher availability ∧ no conflict,
+ * with dated exceptions overriding recurring availability on their date (BR-06).
+ *
+ * Students are not a constraint on time. They were once — a child had a weekly
+ * pattern of their own and it was intersected with the teacher's — but the
+ * school does not work that way, so the only diary consulted is the teacher's.
+ * A child is still never double-booked; that is a conflict check, not an
+ * availability one.
  *
  * Note: the AI that Phase 2 adds only ever *parsed the sentence*. Everything
  * below is the actual intelligence in scheduling and ships now.
@@ -30,10 +35,14 @@ export interface TeacherSnapshot {
   exceptions: DatedException[];
 }
 
+/**
+ * A student is a name and an id here. They carry no weekly availability: the
+ * school decided that when a child can attend is not something it tracks, so
+ * the only availability in scheduling is the teacher's.
+ */
 export interface StudentSnapshot {
   studentId: string;
   fullName: string;
-  availability: RecurringSlot[];
 }
 
 export interface BookedOccurrence {
@@ -143,41 +152,27 @@ function canTeach(teacher: TeacherSnapshot, subjectId: string, levelOrder: numbe
 }
 
 /**
- * Start times that fit the whole class, per weekday, once the teacher's and
- * every student's weekly availability are intersected.
+ * Start times that fit the whole class, per weekday, within the teacher's
+ * weekly availability.
  *
  * Shared by the search and its diagnosis so the two cannot disagree about what
- * "they are both free" means.
+ * "the teacher is free" means.
  */
 function sharedStartTimes(
   teacher: TeacherSnapshot,
-  students: StudentSnapshot[],
   durationMinutes: number,
 ): Map<number, Set<string>> {
   const startTimesByWeekday = new Map<number, Set<string>>();
 
   for (let weekday = 0; weekday < 7; weekday += 1) {
-    const teacherWindows: TimeRange[] = teacher.availability
+    const windows: TimeRange[] = teacher.availability
       .filter((a) => a.weekday === weekday)
       .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
-    if (teacherWindows.length === 0) continue;
+    if (windows.length === 0) continue;
 
-    let shared = teacherWindows;
-    for (const student of students) {
-      const studentWindows: TimeRange[] = student.availability
-        .filter((a) => a.weekday === weekday)
-        .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
-      if (studentWindows.length === 0) {
-        shared = [];
-        break;
-      }
-      shared = intersectRanges(shared, studentWindows);
-    }
-    if (shared.length === 0) continue;
-
-    // Slide the class duration through each shared window.
+    // Slide the class duration through each window.
     const starts = new Set<string>();
-    for (const window of shared) {
+    for (const window of windows) {
       const first = toMinutes(window.startTime);
       const last = toMinutes(window.endTime) - durationMinutes;
       const aligned = Math.ceil(first / STEP_MINUTES) * STEP_MINUTES;
@@ -220,8 +215,8 @@ export function findValidSlots(request: SlotRequest, snapshot: SchedulingSnapsho
   const results: RankedSlot[] = [];
 
   for (const teacher of candidates) {
-    // 2/3 — Availability intersection, then the duration slid through it.
-    const startTimesByWeekday = sharedStartTimes(teacher, students, request.durationMinutes);
+    // 2/3 — The teacher's weekly windows, with the duration slid through them.
+    const startTimesByWeekday = sharedStartTimes(teacher, request.durationMinutes);
 
     // 4 — Group the weekdays that share a start time ("Mon & Wed · 8:00 – 9:00").
     for (const [startTime, days] of daysByStartTime(startTimesByWeekday)) {
@@ -355,35 +350,27 @@ export function diagnoseNoOptions(
 
   const candidates = requested ? [requested] : capable;
 
-  // 2 — Availability, named per person so the admin knows whose to set.
+  // 2 — Availability. Only the teacher has any, so only the teacher can lack it.
   const reasons: string[] = [];
-  const studentsUnset = students.filter((s) => s.availability.length === 0);
-  if (studentsUnset.length) {
-    reasons.push(
-      `${list(studentsUnset.map((s) => s.fullName))} ${
-        studentsUnset.length === 1 ? 'has' : 'have'
-      } no weekly availability set.`,
-    );
-  }
   const teachersUnset = candidates.filter((t) => t.availability.length === 0);
   if (teachersUnset.length === candidates.length) {
     reasons.push(`${list(candidates.map((t) => t.fullName))} has no weekly availability set.`);
   }
   if (reasons.length) return reasons;
 
-  // 3 — Overlap, and whether it covers enough days for the requested frequency.
+  // 3 — Whether the teacher's week holds a long enough window, on enough days.
   let mostDaysAtOneTime = 0;
   for (const teacher of candidates) {
-    for (const [, days] of daysByStartTime(sharedStartTimes(teacher, students, request.durationMinutes))) {
+    for (const [, days] of daysByStartTime(sharedStartTimes(teacher, request.durationMinutes))) {
       mostDaysAtOneTime = Math.max(mostDaysAtOneTime, days.length);
     }
   }
 
   if (mostDaysAtOneTime === 0) {
     return [
-      `There is no ${request.durationMinutes}-minute window when ${list(
-        candidates.map((t) => t.fullName),
-      )} and ${list(students.map((s) => s.fullName))} are both free on the same day.`,
+      `${list(candidates.map((t) => t.fullName))} ${candidates.length === 1 ? 'has' : 'have'} no ` +
+        `${request.durationMinutes}-minute window free on any day. Widen their weekly availability ` +
+        'under Teachers → My Time, or shorten the class.',
     ];
   }
 
@@ -433,14 +420,12 @@ export function validateMove(
     return { valid: false, reason: 'The teacher is not available then.' };
   }
 
+  // The students still have to exist; they just no longer have a diary of their
+  // own to check against. Double-booking is caught by the conflict scan below.
   for (const studentId of move.studentIds) {
-    const student = snapshot.students.find((s) => s.studentId === studentId);
-    if (!student) return { valid: false, reason: 'Student not found.' };
-    const windows = resolveAvailability(student.availability, [], date);
-    const fits = windows.some(
-      (w) => toMinutes(w.startTime) <= toMinutes(startTime) && toMinutes(w.endTime) >= toMinutes(endTime),
-    );
-    if (!fits) return { valid: false, reason: `${student.fullName} is not available then.` };
+    if (!snapshot.students.some((s) => s.studentId === studentId)) {
+      return { valid: false, reason: 'Student not found.' };
+    }
   }
 
   const slotEnd = combineDateAndTime(date, endTime);

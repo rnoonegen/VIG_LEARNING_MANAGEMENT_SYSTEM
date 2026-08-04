@@ -391,10 +391,6 @@ async function seedDemo() {
         data: spec.subjects.map((s) => ({ studentId: student!.id, ...s })),
       });
 
-      await prisma.studentAvailability.createMany({
-        data: weekWindows('09:00', '15:00').map((w) => ({ ...w, studentId: student!.id })),
-      });
-
       for (const link of spec.parents) {
         await prisma.parentStudent.create({
           data: { parentId: link.parentId, studentId: student.id, relationship: link.relationship },
