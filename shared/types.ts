@@ -774,6 +774,25 @@ export interface MomentCollectionDetailDto extends MomentCollectionDto {
 }
 
 /**
+ * One child's own entry, seen from their profile rather than from the moment.
+ *
+ * A moment's card answers "what did the class do"; a profile asks "what did this
+ * child do", which is the entry itself. The entry alone would be a photo with no
+ * account of where it came from, so it carries the heading, dates and folder of
+ * the moment it belongs to — enough to place it without loading the moment.
+ */
+export interface StudentMomentEntryDto extends MomentEntryDto {
+  moment: {
+    id: string;
+    heading: string;
+    startDate: string;
+    endDate: string;
+    /** The folder it is filed in — a subject, or the admin-only "Others". */
+    subject: { id: string; name: string; colorToken: string };
+  };
+}
+
+/**
  * A folder on the Moments landing page: one per subject, plus "Others".
  *
  * The counts are what the card is for — a folder that says nothing about how

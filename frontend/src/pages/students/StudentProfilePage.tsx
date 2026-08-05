@@ -20,7 +20,7 @@ import { Pill, SubjectBadge } from '@/components/ui/Chip';
 import { Field, Input, Textarea } from '@/components/ui/Field';
 import { LearningMap } from '@/components/LearningMap';
 import { DevelopmentPanel } from '@/components/DevelopmentPanel';
-import { MomentsGrid } from '@/components/MomentsGrid';
+import { StudentMomentsSection } from '@/pages/moments/StudentMomentsSection';
 import { SubjectLevelEditor, type SubjectLevelDraft } from '@/components/SubjectLevelEditor';
 
 type Tab = 'overview' | 'classes' | 'learning' | 'development' | 'moments' | 'history';
@@ -93,7 +93,14 @@ export function StudentProfilePage({ basePath, canManage }: { basePath: string; 
         <LearningMap studentId={studentId} editable canChangeLevel={canManage} />
       ) : null}
       {tab === 'development' ? <DevelopmentPanel studentId={studentId} editable /> : null}
-      {tab === 'moments' ? <MomentsGrid endpoint={`/students/${studentId}/moments`} /> : null}
+      {tab === 'moments' ? (
+        // Moments live under the same role section this profile was reached
+        // through, so a card here opens where that role already browses them.
+        <StudentMomentsSection
+          studentId={studentId}
+          momentsBasePath={basePath.replace(/\/students$/, '/moments')}
+        />
+      ) : null}
       {tab === 'history' ? <History studentId={studentId} /> : null}
 
       {managing ? <ManageStudentModal student={data} onClose={() => setManaging(false)} /> : null}

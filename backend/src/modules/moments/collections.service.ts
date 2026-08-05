@@ -8,6 +8,7 @@ import type {
   MomentFolderDto,
   MomentStudentOptionDto,
   MomentSubjectOptionDto,
+  StudentMomentEntryDto,
 } from '@vig/shared';
 import {
   isOthersFolder,
@@ -338,6 +339,59 @@ export async function listCollections(
   );
 
   return visible.map(({ row, entries }) => toSummary(row, entries, photoUrls, ctx));
+}
+
+/**
+ * One child's own entries, across every moment they appear in.
+ *
+ * This is the student profile's answer, and it is a different question from the
+ * folder's: not "which moments happened" but "what was written about this
+ * child". So what comes back is the entries themselves, each carrying the moment
+ * it belongs to rather than being wrapped in it.
+ *
+ * Visibility is the same predicate the folders and the lists use, so a moment a
+ * teacher cannot browse does not reappear here through a child they teach — and
+ * a parent still sees their own child's entry only.
+ */
+export async function listStudentEntries(
+  ctx: AuthContext,
+  studentId: string,
+): Promise<StudentMomentEntryDto[]> {
+  const scope = await readableStudentIds(ctx);
+  const where = visibilityWhere(ctx, scope, { studentId });
+
+  const rows = await prisma.momentCollection.findMany({
+    where,
+    include: collectionInclude,
+    orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }],
+    take: 120,
+  });
+
+  // Two filters, and both are load-bearing: the scope keeps another family's
+  // child out, and the id narrows a moment full of children down to the one
+  // whose profile this is.
+  const mine = rows.map((row) => ({
+    row,
+    entries: visibleEntries(row, scope).filter((e) => e.studentId === studentId),
+  }));
+
+  const photoUrls = await signMany(
+    mine.flatMap(({ entries }) => entries.flatMap((e) => (e.photoPath ? [e.photoPath] : []))),
+  );
+
+  const out: StudentMomentEntryDto[] = [];
+  for (const { row, entries } of mine) {
+    const moment = {
+      id: row.id,
+      heading: row.heading,
+      startDate: dateKey(row.startDate),
+      endDate: dateKey(row.endDate),
+      // No subject means Others, named by the API rather than the database (022).
+      subject: row.subject ?? OTHERS_FOLDER,
+    };
+    for (const dto of await toEntryDto(entries, photoUrls)) out.push({ ...dto, moment });
+  }
+  return out;
 }
 
 export async function getCollection(

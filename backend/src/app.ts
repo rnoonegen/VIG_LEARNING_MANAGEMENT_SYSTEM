@@ -18,7 +18,10 @@ import {
 import { learningRouter } from './modules/learning/routes.js';
 import { developmentAreasRouter, studentDevelopmentRouter } from './modules/development/routes.js';
 import { momentsRouter, studentMomentsRouter } from './modules/moments/routes.js';
-import { momentCollectionsRouter } from './modules/moments/collections.routes.js';
+import {
+  momentCollectionsRouter,
+  studentMomentEntriesRouter,
+} from './modules/moments/collections.routes.js';
 import { parentRouter } from './modules/parent/routes.js';
 import { parentsRouter } from './modules/parents/routes.js';
 import { profileRouter } from './modules/profile/routes.js';
@@ -72,6 +75,7 @@ export function createApp() {
   api.use('/students', learningRouter);
   api.use('/students', studentDevelopmentRouter);
   api.use('/students', studentMomentsRouter);
+  api.use('/students', studentMomentEntriesRouter);
   api.use('/students', studentsRouter);
 
   api.use('/schedule', scheduleRouter);

@@ -144,3 +144,22 @@ momentCollectionsRouter.delete(
     ok(res, await service.deleteEntry(auth(req), req.params.id, req.params.entryId)),
   ),
 );
+
+/**
+ * One child's own entries, for their profile — mounted under /students, where
+ * the rest of a child's record already lives.
+ *
+ * Open to every signed-in role, as the lists above are: `assertCanReadStudent`
+ * settles whether this caller may look at this child at all, and the service
+ * settles what they see once inside.
+ */
+export const studentMomentEntriesRouter = Router();
+
+studentMomentEntriesRouter.get(
+  '/:id/moment-entries',
+  handler(async (req, res) => {
+    const ctx = auth(req);
+    await assertCanReadStudent(ctx, req.params.id);
+    return ok(res, await service.listStudentEntries(ctx, req.params.id));
+  }),
+);

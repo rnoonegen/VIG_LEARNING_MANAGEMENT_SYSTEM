@@ -5,6 +5,7 @@ import type { MomentDto } from '@vig/shared';
 import { formatShortDate } from '@vig/shared';
 import { get } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
+import { Section } from '@/components/ui/Layout';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
 import { Modal } from '@/components/ui/Modal';
 import { Pill, SubjectBadge } from '@/components/ui/Chip';
@@ -19,11 +20,21 @@ import { Pill, SubjectBadge } from '@/components/ui/Chip';
  */
 export function MomentsGrid({
   endpoint,
+  heading,
+  hideWhenEmpty = false,
   emptyTitle = 'No moments yet',
   emptyDescription = 'Photos and videos from classes will appear here.',
   emptyAction,
 }: {
   endpoint: string;
+  /** Renders the grid inside a titled section, so a caller can stack several. */
+  heading?: string;
+  /**
+   * Say nothing rather than say "empty". Set where this grid is the secondary
+   * half of a page: a heading followed by an empty state is noise when the
+   * section above it already answered the question.
+   */
+  hideWhenEmpty?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
   emptyAction?: React.ReactNode;
@@ -35,21 +46,34 @@ export function MomentsGrid({
     queryFn: () => get<MomentDto[]>(endpoint),
   });
 
-  if (isLoading) return <LoadingState rows={3} />;
-  if (isError || !data) return <ErrorState onRetry={() => void refetch()} />;
-  if (data.length === 0) {
+  // A heading that appears for a moment and then removes itself reads as a
+  // glitch, so an optional section stays silent until it knows it has content.
+  if (isLoading) return hideWhenEmpty ? null : <LoadingState rows={3} />;
+  // A failure is still shown either way — hiding it would pass a broken request
+  // off as "nothing here".
+  if (isError || !data) {
     return (
-      <EmptyState
-        icon={<ImageIcon size={26} />}
-        title={emptyTitle}
-        description={emptyDescription}
-        action={emptyAction}
-      />
+      <Wrap heading={heading}>
+        <ErrorState onRetry={() => void refetch()} />
+      </Wrap>
+    );
+  }
+  if (data.length === 0) {
+    if (hideWhenEmpty) return null;
+    return (
+      <Wrap heading={heading}>
+        <EmptyState
+          icon={<ImageIcon size={26} />}
+          title={emptyTitle}
+          description={emptyDescription}
+          action={emptyAction}
+        />
+      </Wrap>
     );
   }
 
   return (
-    <>
+    <Wrap heading={heading}>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {data.map((moment) => {
           const cover = moment.media[0];
@@ -103,8 +127,14 @@ export function MomentsGrid({
       </div>
 
       {open ? <MomentDetail moment={open} onClose={() => setOpen(null)} /> : null}
-    </>
+    </Wrap>
   );
+}
+
+/** The section chrome, only when a heading was asked for. */
+function Wrap({ heading, children }: { heading?: string; children: React.ReactNode }) {
+  if (!heading) return <>{children}</>;
+  return <Section title={heading}>{children}</Section>;
 }
 
 function MomentDetail({ moment, onClose }: { moment: MomentDto; onClose: () => void }) {

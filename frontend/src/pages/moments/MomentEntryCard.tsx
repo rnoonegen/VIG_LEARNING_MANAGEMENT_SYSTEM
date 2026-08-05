@@ -113,8 +113,11 @@ export function MomentEntryDetail({
   entry: MomentEntryDto;
   canManage: boolean;
   onClose: () => void;
-  onEdit: () => void;
+  /** Absent where the entry is only being read, as on a student's profile. */
+  onEdit?: () => void;
 }) {
+  const editable = canManage && Boolean(onEdit);
+
   return (
     <Modal
       open
@@ -123,7 +126,7 @@ export function MomentEntryDetail({
       title={entry.title}
       description={entry.student.fullName}
       footer={
-        canManage ? (
+        editable ? (
           <>
             <Button variant="secondary" onClick={onClose}>
               Close

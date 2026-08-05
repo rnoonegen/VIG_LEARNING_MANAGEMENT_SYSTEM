@@ -4,6 +4,7 @@ import type {
   MomentCollectionDto,
   MomentFolderDto,
   MomentStudentOptionDto,
+  StudentMomentEntryDto,
 } from '@vig/shared';
 import { fromDateKey } from '@vig/shared';
 import { del, get, patch, post } from '@/lib/api';
@@ -24,6 +25,7 @@ export const momentKeys = {
     ['moment-collections', 'list', params ?? {}] as const,
   detail: (id: string) => ['moment-collections', 'detail', id] as const,
   students: (id: string) => ['moment-collections', 'students', id] as const,
+  studentEntries: (id: string) => ['moment-collections', 'student-entries', id] as const,
 };
 
 /**
@@ -48,6 +50,18 @@ export function useMoments(params?: {
   return useQuery({
     queryKey: momentKeys.list(params),
     queryFn: () => get<MomentCollectionDto[]>(ROOT, params),
+  });
+}
+
+/**
+ * One child's own entries, for their profile — the entries themselves, not the
+ * moments wrapped around them. Keyed under `moment-collections` like everything
+ * else here, so writing an entry anywhere refreshes this too.
+ */
+export function useStudentMomentEntries(studentId: string) {
+  return useQuery({
+    queryKey: momentKeys.studentEntries(studentId),
+    queryFn: () => get<StudentMomentEntryDto[]>(`/students/${studentId}/moment-entries`),
   });
 }
 
