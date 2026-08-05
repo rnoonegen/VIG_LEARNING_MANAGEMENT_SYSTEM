@@ -96,6 +96,15 @@ function Wordmark() {
  * collapses to a bottom bar and a compact top bar. Content priority, semantic
  * colour and interaction language are identical across both — it reflows, it does
  * not miniaturise (Design System §11).
+ *
+ * The shell is the height of the viewport and does not itself scroll: the rail
+ * and the top bar are fixed furniture, and only <main> scrolls. Content
+ * therefore passes *under* nothing — the bar is opaque and owns its strip of the
+ * screen, rather than being a translucent sheet that scrolled text smears
+ * through.
+ *
+ * `dvh` rather than `vh` so a mobile browser collapsing its address bar resizes
+ * the shell instead of hiding the last 60px of it.
  */
 export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: string }) {
   const { user, signOut } = useAuth();
@@ -108,12 +117,13 @@ export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: str
   };
 
   return (
-    <div className="min-h-screen bg-canvas">
+    <div className="flex h-dvh flex-col overflow-hidden bg-canvas">
       <OfflineBanner />
 
-      <div className="flex">
+      {/* min-h-0 lets the row shrink so the scroll lands on <main>, not here. */}
+      <div className="flex min-h-0 flex-1">
         {/* Desktop left rail */}
-        <aside className="sticky top-0 hidden h-screen w-[232px] shrink-0 flex-col border-r border-line bg-card px-4 py-5 md:flex">
+        <aside className="hidden h-full w-[232px] shrink-0 flex-col border-r border-line bg-card px-4 py-5 md:flex">
           <div className="px-2 pb-6">
             <Wordmark />
           </div>
@@ -137,6 +147,8 @@ export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: str
             ))}
           </nav>
 
+          {/* Who you are signed in as now lives in the top bar beside the bell,
+              where account controls are looked for. The rail keeps navigation. */}
           <div className="flex flex-col gap-1 border-t border-line pt-3">
             <NavLink
               to={settingsPath}
@@ -150,30 +162,12 @@ export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: str
               <Settings size={ICON_SIZE} />
               Settings
             </NavLink>
-
-            <div className="mt-2 flex items-center gap-2.5 rounded-[12px] px-2 py-2">
-              <Avatar name={user?.fullName ?? ''} url={user?.avatarUrl} size={32} />
-              <span className="min-w-0 flex-1 leading-tight">
-                <span className="block truncate text-xs font-medium text-ink">{user?.fullName}</span>
-                <span className="block text-[10px] capitalize text-ink-3">
-                  {user?.role.toLowerCase()}
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={handleSignOut}
-                aria-label="Sign out"
-                className="rounded-full p-2 text-ink-3 hover:bg-lavender hover:text-danger"
-              >
-                <LogOut size={15} />
-              </button>
-            </div>
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* Mobile top bar */}
-          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-card px-4 py-3 md:hidden">
+          <header className="z-30 flex shrink-0 items-center justify-between border-b border-line bg-card px-4 py-3 md:hidden">
             <Wordmark />
             <NavLink
               to="/notifications"
@@ -189,8 +183,10 @@ export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: str
             </NavLink>
           </header>
 
-          {/* Desktop top bar */}
-          <header className="sticky top-0 z-30 hidden items-center justify-end gap-2 border-b border-line bg-canvas/80 px-8 py-3 backdrop-blur md:flex">
+          {/* Desktop top bar. Opaque, not a translucent sheet — it is the one
+              strip of the screen that never moves, so nothing may show through
+              it as the page scrolls beneath. */}
+          <header className="z-30 hidden shrink-0 items-center justify-end gap-1 border-b border-line bg-card px-8 py-2.5 md:flex">
             <NavLink
               to="/notifications"
               aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
@@ -203,11 +199,43 @@ export function Shell({ nav, settingsPath }: { nav: NavItem[]; settingsPath: str
                 </span>
               ) : null}
             </NavLink>
+
+            <span aria-hidden className="mx-2 h-6 w-px bg-line" />
+
+            <NavLink
+              to={settingsPath}
+              className="flex items-center gap-2.5 rounded-[12px] px-2 py-1.5 transition-colors hover:bg-lavender-2"
+            >
+              <Avatar name={user?.fullName ?? ''} url={user?.avatarUrl} size={30} />
+              <span className="max-w-[160px] leading-tight">
+                <span className="block truncate text-xs font-medium text-ink">
+                  {user?.fullName}
+                </span>
+                <span className="block text-[10px] capitalize text-ink-3">
+                  {user?.role.toLowerCase()}
+                </span>
+              </span>
+            </NavLink>
+
+            <button
+              type="button"
+              onClick={handleSignOut}
+              aria-label="Sign out"
+              title="Sign out"
+              className="rounded-full p-2 text-ink-3 transition-colors hover:bg-lavender hover:text-danger"
+            >
+              <LogOut size={16} />
+            </button>
           </header>
 
-          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-5 pb-24 md:px-8 md:py-8 md:pb-8">
-            <InstallPrompt />
-            <Outlet />
+          {/* The only scrolling region. The max-width sits inside it so the
+              scrollbar stays at the edge of the screen, not at the edge of the
+              column. */}
+          <main data-app-scroll className="flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-6xl px-4 py-5 pb-24 md:px-8 md:py-8 md:pb-8">
+              <InstallPrompt />
+              <Outlet />
+            </div>
           </main>
         </div>
       </div>

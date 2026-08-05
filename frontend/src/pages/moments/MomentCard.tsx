@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
-import { CalendarRange, Images, Users } from 'lucide-react';
+import { CalendarRange, Images, Pencil, Trash2, Users } from 'lucide-react';
 import type { MomentCollectionDto } from '@vig/shared';
 import { asToken, cn, TOKEN_STYLES } from '@/lib/ui';
+import { IconAction } from './IconAction';
 import { formatDateRange, formatNameList } from './momentsApi';
 
 /**
@@ -11,27 +12,50 @@ import { formatDateRange, formatNameList } from './momentsApi';
  * to four arranged as a mosaic, with the heading and its context sitting below
  * on a calm white surface rather than over the top of the images. Media leads,
  * chrome stays restrained (Design System §7).
+ *
+ * The subject is not printed here. A card is only ever seen inside its own
+ * folder, so naming the subject on every card in a grid of one subject is a
+ * label that repeats what the page title already said.
+ *
+ * Editing and deleting live here rather than on the moment itself: they act on
+ * the card as a whole, and doing them from the list means you never have to open
+ * a moment just to correct its heading or throw it away.
  */
-export function MomentCard({ moment, to }: { moment: MomentCollectionDto; to: string }) {
-  const token = asToken(moment.subject.colorToken);
+export function MomentCard({
+  moment,
+  to,
+  onEdit,
+  onDelete,
+}: {
+  moment: MomentCollectionDto;
+  to: string;
+  /** Both are given only when the caller may manage this moment. */
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
+  const manageable = Boolean(onEdit && onDelete);
 
   return (
-    <Link
-      to={to}
+    // Not a <Link> wrapper: the manage buttons are interactive and may not be
+    // nested inside an anchor. The heading's link is stretched across the card
+    // instead, and the buttons sit above it.
+    <div
       className={cn(
-        'group flex flex-col overflow-hidden rounded-[18px] border border-line bg-card',
+        'group relative flex flex-col overflow-hidden rounded-[18px] border border-line bg-card',
         'transition-all duration-200 hover:-translate-y-0.5 hover:border-violet/40 hover:shadow-[0_12px_28px_-16px_rgba(17,22,92,0.35)]',
       )}
     >
       <Cover moment={moment} />
 
       <div className="flex flex-1 flex-col gap-2 p-4">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide">
-          <span className={cn('h-2 w-2 shrink-0 rounded-full', TOKEN_STYLES[token].dot)} />
-          <span className={TOKEN_STYLES[token].text}>{moment.subject.name}</span>
-        </span>
-
-        <h3 className="line-clamp-2 text-[17px] leading-snug">{moment.heading}</h3>
+        <h3 className="line-clamp-2 text-[17px] leading-snug">
+          <Link
+            to={to}
+            className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet/60"
+          >
+            {moment.heading}
+          </Link>
+        </h3>
 
         {moment.description ? (
           <p className="line-clamp-2 text-xs leading-relaxed text-ink-2">{moment.description}</p>
@@ -55,23 +79,39 @@ export function MomentCard({ moment, to }: { moment: MomentCollectionDto; to: st
           </div>
         </div>
       </div>
-    </Link>
+
+      {manageable ? (
+        <div
+          className={cn(
+            'absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity',
+            'group-hover:opacity-100 focus-within:opacity-100',
+          )}
+        >
+          <IconAction label={`Edit ${moment.heading}`} onClick={onEdit!}>
+            <Pencil size={14} />
+          </IconAction>
+          <IconAction label={`Delete ${moment.heading}`} onClick={onDelete!} danger>
+            <Trash2 size={14} />
+          </IconAction>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 /**
- * The mosaic.
+ * The moment's own picture.
  *
- * One photo fills the frame; two split it; three or more give the first the left
- * half and stack the rest down the right. An empty moment still needs a cover,
- * so it gets a tinted panel in the subject's colour rather than a grey box —
- * "nothing added yet" should look deliberate, not broken.
+ * This used to be a mosaic assembled from the children's entry photos, which put
+ * private per-child photographs into browse chrome. It is now the one cover the
+ * author chose — and when they chose none, a tinted panel in the subject's
+ * colour rather than a grey box: "no cover yet" should look deliberate, not
+ * broken.
  */
 function Cover({ moment }: { moment: MomentCollectionDto }) {
-  const photos = moment.previewPhotoUrls;
   const token = asToken(moment.subject.colorToken);
 
-  if (photos.length === 0) {
+  if (!moment.coverPhotoUrl) {
     return (
       <div className="relative flex aspect-[16/10] items-center justify-center overflow-hidden bg-lavender-2">
         <span
@@ -90,45 +130,20 @@ function Cover({ moment }: { moment: MomentCollectionDto }) {
         />
         <span className={cn('relative flex flex-col items-center gap-1.5', TOKEN_STYLES[token].text)}>
           <Images size={26} />
-          <span className="text-[11px] font-medium">Nothing added yet</span>
+          <span className="text-[11px] font-medium">No cover image</span>
         </span>
       </div>
     );
   }
 
-  const [first, ...rest] = photos;
-
   return (
     <div className="aspect-[16/10] overflow-hidden bg-lavender">
-      {photos.length === 1 ? (
-        <Photo url={first!} className="h-full w-full" />
-      ) : photos.length === 2 ? (
-        <div className="grid h-full grid-cols-2 gap-0.5">
-          {photos.map((url, i) => (
-            <Photo key={i} url={url} className="h-full w-full" />
-          ))}
-        </div>
-      ) : (
-        <div className="grid h-full grid-cols-3 gap-0.5">
-          <Photo url={first!} className="col-span-2 h-full w-full" />
-          <div className="grid grid-rows-2 gap-0.5">
-            {rest.slice(0, 2).map((url, i) => (
-              <Photo key={i} url={url} className="h-full w-full" />
-            ))}
-          </div>
-        </div>
-      )}
+      <img
+        src={moment.coverPhotoUrl}
+        alt=""
+        loading="lazy"
+        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+      />
     </div>
-  );
-}
-
-function Photo({ url, className }: { url: string; className?: string }) {
-  return (
-    <img
-      src={url}
-      alt=""
-      loading="lazy"
-      className={cn('object-cover transition-transform duration-300 group-hover:scale-[1.04]', className)}
-    />
   );
 }

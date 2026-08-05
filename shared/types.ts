@@ -759,8 +759,11 @@ export interface MomentCollectionDto {
   /** True when the signed-in user may add to, edit or remove this moment. */
   canManage: boolean;
   entryCount: number;
-  /** First few photos, for the cover mosaic. */
-  previewPhotoUrls: string[];
+  /**
+   * The moment's own cover — a short-lived signed URL, or null when none was
+   * chosen. Never assembled from the children's entry photos (023).
+   */
+  coverPhotoUrl: string | null;
   /** First names of the children inside, for the summary line. */
   studentNames: string[];
   createdAt: string;
@@ -768,6 +771,26 @@ export interface MomentCollectionDto {
 
 export interface MomentCollectionDetailDto extends MomentCollectionDto {
   entries: MomentEntryDto[];
+}
+
+/**
+ * A folder on the Moments landing page: one per subject, plus "Others".
+ *
+ * The counts are what the card is for — a folder that says nothing about how
+ * much is inside it is just a link with extra steps.
+ */
+export interface MomentFolderDto {
+  /** A subject id, or `OTHERS_FOLDER_ID` for the admin-only catch-all. */
+  id: string;
+  name: string;
+  colorToken: string;
+  isOthers: boolean;
+  momentCount: number;
+  entryCount: number;
+  /** Start date of the newest moment inside, or null when the folder is empty. */
+  latestStartDate: string | null;
+  /** Covers of the newest moments inside, for the card's strip (023). */
+  previewPhotoUrls: string[];
 }
 
 /** A child who may still be added to a moment, plus why they cannot. */
@@ -785,6 +808,8 @@ export interface MomentSubjectOptionDto {
   id: string;
   name: string;
   colorToken: string;
+  /** True for the admin-only "Others" folder, which is not a real subject. */
+  isOthers: boolean;
 }
 
 // --- Parent -----------------------------------------------------------------

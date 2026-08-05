@@ -18,7 +18,7 @@ import { Field, Input, Textarea } from '@/components/ui/Field';
 import { Avatar } from '@/components/ui/Layout';
 import { cn } from '@/lib/ui';
 import {
-  uploadEntryPhoto,
+  uploadMomentPhoto,
   useAddEntry,
   useMomentStudents,
   useUpdateEntry,
@@ -30,13 +30,18 @@ interface LinkDraft {
 }
 
 /**
- * One child's entry inside a moment.
+ * An entry inside a moment — written once, for as many children as it applies to.
  *
- * The child is chosen once and never moves: an entry is the record of what that
- * particular child did, so editing offers everything except who it belongs to.
- * Children already placed in this moment stay visible in the list but cannot be
- * picked — a name that disappeared would read as a missing child rather than as
- * one already written up.
+ * Most of what happens in a class happens to a group: the same photo, the same
+ * sentence about what they built. So the form is filled in once and the children
+ * it was written for are ticked off together, with "Select all" for the whole
+ * class. Each one still gets their own entry, editable on its own afterwards.
+ *
+ * Editing is single by design: an entry belongs to one child and never moves, so
+ * editing offers everything except who it belongs to. Children already placed in
+ * this moment stay visible in the list but cannot be picked — a name that
+ * disappeared would read as a missing child rather than as one already written
+ * up.
  */
 export function EntryFormModal({
   collectionId,
@@ -50,7 +55,7 @@ export function EntryFormModal({
 }) {
   const editing = Boolean(entry);
 
-  const [studentId, setStudentId] = useState(entry?.student.id ?? '');
+  const [studentIds, setStudentIds] = useState<string[]>(entry ? [entry.student.id] : []);
   const [search, setSearch] = useState('');
   const [title, setTitle] = useState(entry?.title ?? '');
   const [description, setDescription] = useState(entry?.description ?? '');
@@ -79,9 +84,26 @@ export function EntryFormModal({
     return (students ?? []).filter((s) => s.fullName.toLowerCase().includes(term));
   }, [students, search]);
 
+  // "Select all" means everyone the search is currently showing who is still
+  // free to add — not the whole school behind a filter the user cannot see.
+  const selectable = useMemo(() => filtered.filter((s) => !s.takenByEntryId), [filtered]);
+  const allSelected = selectable.length > 0 && selectable.every((s) => studentIds.includes(s.id));
+
   const available = (students ?? []).filter((s) => !s.takenByEntryId).length;
   const hasMedia = Boolean(photo || pendingFile || videoUrl.trim());
-  const ready = Boolean(studentId) && title.trim().length > 0 && hasMedia && !saving;
+  const ready = studentIds.length > 0 && title.trim().length > 0 && hasMedia && !saving;
+
+  const toggleStudent = (id: string) =>
+    setStudentIds((current) =>
+      current.includes(id) ? current.filter((s) => s !== id) : [...current, id],
+    );
+
+  const toggleAll = () =>
+    setStudentIds((current) =>
+      allSelected
+        ? current.filter((id) => !selectable.some((s) => s.id === id))
+        : [...new Set([...current, ...selectable.map((s) => s.id)])],
+    );
 
   const chooseFile = (file: File | null) => {
     if (!file) return;
@@ -106,7 +128,7 @@ export function EntryFormModal({
       let photoPath: string | null | undefined;
       if (pendingFile) {
         setUploading(true);
-        photoPath = await uploadEntryPhoto(pendingFile);
+        photoPath = await uploadMomentPhoto(pendingFile);
         setUploading(false);
       } else if (editing && !photo) {
         photoPath = null; // Cleared during this edit.
@@ -129,7 +151,7 @@ export function EntryFormModal({
         });
       } else {
         await add.mutateAsync({
-          studentId,
+          studentIds,
           title: title.trim(),
           description: description.trim() || undefined,
           photoPath: photoPath ?? undefined,
@@ -149,11 +171,11 @@ export function EntryFormModal({
       open
       onClose={onClose}
       wide
-      title={editing ? `Edit ${entry?.student.fullName.split(' ')[0]}'s entry` : 'Add a student'}
+      title={editing ? `Edit ${entry?.student.fullName.split(' ')[0]}'s entry` : 'Add students'}
       description={
         editing
           ? 'The child an entry belongs to is fixed. Everything else can change.'
-          : 'One entry per child. Add the photo, the video and anything worth linking to.'
+          : 'Write it up once and choose everyone it applies to — each child gets their own entry, which you can edit separately afterwards.'
       }
       footer={
         <>
@@ -165,7 +187,15 @@ export function EntryFormModal({
             disabled={!ready}
             icon={saving ? <Loader2 size={15} className="animate-spin" /> : undefined}
           >
-            {uploading ? 'Uploading…' : saving ? 'Saving…' : editing ? 'Save changes' : 'Add entry'}
+            {uploading
+              ? 'Uploading…'
+              : saving
+                ? 'Saving…'
+                : editing
+                  ? 'Save changes'
+                  : studentIds.length > 1
+                    ? `Add ${studentIds.length} entries`
+                    : 'Add entry'}
           </Button>
         </>
       }
@@ -182,41 +212,67 @@ export function EntryFormModal({
           </div>
         ) : (
           <Field
-            label="Which student?"
+            label="Which students?"
             required
             hint={
               loadingStudents
                 ? 'Loading students…'
                 : available === 0
                   ? 'Every student you can add already has an entry in this moment.'
-                  : `${available} student${available === 1 ? '' : 's'} still to add`
+                  : studentIds.length > 0
+                    ? `${studentIds.length} selected of ${available} still to add`
+                    : `${available} student${available === 1 ? '' : 's'} still to add`
             }
           >
             <div className="flex flex-col gap-2">
-              <div className="relative">
-                <Search
-                  size={15}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3"
-                />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by name"
-                  className="pl-9"
-                  aria-label="Search students"
-                />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative flex-1">
+                  <Search
+                    size={15}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3"
+                  />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search by name"
+                    className="pl-9"
+                    aria-label="Search students"
+                  />
+                </div>
+
+                {/* Named for what it will do next, and for how many — "Select all"
+                    over a filtered list has to say what "all" currently means. */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={toggleAll}
+                  disabled={selectable.length === 0}
+                  className="shrink-0"
+                >
+                  {allSelected
+                    ? 'Clear all'
+                    : search.trim()
+                      ? `Select these ${selectable.length}`
+                      : `Select all ${selectable.length}`}
+                </Button>
               </div>
 
-              <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-[12px] border border-line p-1.5">
+              <div
+                role="group"
+                aria-label="Students in this entry"
+                className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-[12px] border border-line p-1.5"
+              >
                 {filtered.map((student) => {
                   const taken = Boolean(student.takenByEntryId);
-                  const active = studentId === student.id;
+                  const active = studentIds.includes(student.id);
                   return (
                     <button
                       key={student.id}
                       type="button"
+                      role="checkbox"
+                      aria-checked={active}
                       disabled={taken}
-                      onClick={() => setStudentId(student.id)}
+                      onClick={() => toggleStudent(student.id)}
                       className={cn(
                         'touch-target flex items-center gap-3 rounded-[10px] border px-2.5 py-2 text-left transition-colors',
                         active
@@ -226,6 +282,22 @@ export function EntryFormModal({
                             : 'border-transparent hover:bg-lavender-2',
                       )}
                     >
+                      {/* A box rather than a tick-when-chosen: the empty state has
+                          to show that more than one name can go in. */}
+                      <span
+                        aria-hidden
+                        className={cn(
+                          'flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border transition-colors',
+                          taken
+                            ? 'border-line bg-lavender-2'
+                            : active
+                              ? 'border-violet bg-violet text-white'
+                              : 'border-line bg-card',
+                        )}
+                      >
+                        {active ? <Check size={12} strokeWidth={3} /> : null}
+                      </span>
+
                       <Avatar name={student.fullName} url={student.avatarUrl} size={32} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-ink">
@@ -239,8 +311,6 @@ export function EntryFormModal({
                         <span className="shrink-0 rounded-full bg-lavender-2 px-2 py-1 text-[10px] font-medium text-ink-3">
                           Already added
                         </span>
-                      ) : active ? (
-                        <Check size={16} strokeWidth={3} className="shrink-0 text-violet" />
                       ) : null}
                     </button>
                   );
@@ -252,6 +322,13 @@ export function EntryFormModal({
                   </p>
                 ) : null}
               </div>
+
+              {studentIds.length > 1 ? (
+                <p className="text-[11px] text-ink-3">
+                  The title, photo, video and links below are written once and saved to all{' '}
+                  {studentIds.length} entries. You can edit any of them separately afterwards.
+                </p>
+              ) : null}
             </div>
           </Field>
         )}

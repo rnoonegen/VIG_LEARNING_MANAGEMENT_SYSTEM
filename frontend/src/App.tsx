@@ -38,12 +38,13 @@ import { ClassRecordPage } from './pages/teacher/ClassRecordPage';
 import { ClassProgressPage } from './pages/teacher/ClassProgressPage';
 
 import { MomentsPage } from './pages/moments/MomentsPage';
+import { MomentFolderPage } from './pages/moments/MomentFolderPage';
 import { MomentDetailPage } from './pages/moments/MomentDetailPage';
 
 import { ParentHomePage } from './pages/parent/ParentHomePage';
 import { ParentLearningPage } from './pages/parent/ParentLearningPage';
 import { ParentDevelopmentPage } from './pages/parent/ParentDevelopmentPage';
-import { ParentMomentsPage } from './pages/parent/ParentMomentsPage';
+import { ParentMomentFolderPage, ParentMomentsPage } from './pages/parent/ParentMomentsPage';
 import { WeeklyUpdatePage } from './pages/parent/WeeklyUpdatePage';
 
 /**
@@ -133,8 +134,11 @@ export function App() {
         {/* Accounts moved under Settings. Notifications already sent carry the
             old link, so it keeps working — with the ?reset= id intact. */}
         <Route path="/admin/users" element={<AccountsRedirect />} />
+        {/* Moments open as folders. The static /f/ segment keeps a folder id —
+            which may be the word "others" — out of the moment-id route. */}
         <Route path="/admin/moments" element={<MomentsPage basePath="/admin/moments" />} />
-        <Route path="/admin/moments/:momentId" element={<MomentDetailPage backTo="/admin/moments" />} />
+        <Route path="/admin/moments/f/:folderId" element={<MomentFolderPage basePath="/admin/moments" />} />
+        <Route path="/admin/moments/:momentId" element={<MomentDetailPage basePath="/admin/moments" />} />
       </Route>
 
       {/* --- Teacher --- */}
@@ -153,7 +157,8 @@ export function App() {
         <Route path="/teacher/curriculum" element={<TeacherCurriculumPage />} />
         <Route path="/teacher/class/:occurrenceId/progress" element={<ClassProgressPage />} />
         <Route path="/teacher/moments" element={<MomentsPage basePath="/teacher/moments" />} />
-        <Route path="/teacher/moments/:momentId" element={<MomentDetailPage backTo="/teacher/moments" />} />
+        <Route path="/teacher/moments/f/:folderId" element={<MomentFolderPage basePath="/teacher/moments" />} />
+        <Route path="/teacher/moments/:momentId" element={<MomentDetailPage basePath="/teacher/moments" />} />
       </Route>
 
       {/* The class-record flow is full-screen: a stepper should not compete
@@ -179,7 +184,8 @@ export function App() {
         <Route path="/parent/learning" element={<ParentLearningPage />} />
         <Route path="/parent/development" element={<ParentDevelopmentPage />} />
         <Route path="/parent/moments" element={<ParentMomentsPage />} />
-        <Route path="/parent/moments/:momentId" element={<MomentDetailPage backTo="/parent/moments" />} />
+        <Route path="/parent/moments/f/:folderId" element={<ParentMomentFolderPage />} />
+        <Route path="/parent/moments/:momentId" element={<MomentDetailPage basePath="/parent/moments" />} />
         <Route path="/parent/weekly-updates/:updateId" element={<WeeklyUpdatePage />} />
       </Route>
 

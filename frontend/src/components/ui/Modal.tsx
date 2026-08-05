@@ -29,10 +29,19 @@ export function Modal({
       if (e.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKey);
+
+    // Inside the app shell the page does not scroll — <main> does — so locking
+    // the body alone would leave the background scrolling behind the dialog.
+    // Both are locked, and the shell one is simply absent on the sign-in pages
+    // and the full-screen class record, where the body really is the scroller.
+    const scroller = document.querySelector<HTMLElement>('[data-app-scroll]');
     document.body.style.overflow = 'hidden';
+    if (scroller) scroller.style.overflow = 'hidden';
+
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
+      if (scroller) scroller.style.overflow = '';
     };
   }, [open, onClose]);
 

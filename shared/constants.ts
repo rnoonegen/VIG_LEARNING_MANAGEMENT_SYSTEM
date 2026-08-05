@@ -166,3 +166,24 @@ export const SEED_DEVELOPMENT_AREAS: Array<{
 
 /** Minimum touch target required by Design System §10, in pixels. */
 export const MIN_TOUCH_TARGET_PX = 44;
+
+// --- The "Others" moment folder ---------------------------------------------
+
+/**
+ * Moments are browsed as folders — one per curriculum subject, plus this one.
+ *
+ * "Others" holds what belongs to the school rather than to a subject: a
+ * festival, a trip, a visitor. It is not a subject row (a fake subject would
+ * leak into capabilities, scheduling and the curriculum tree), it is the absence
+ * of one — `subject_id IS NULL` — wearing this id everywhere above the database.
+ *
+ * Only an admin may file a moment here, and only an admin sees what is inside.
+ */
+export const OTHERS_FOLDER_ID = 'others';
+export const OTHERS_FOLDER_NAME = 'Others';
+export const OTHERS_FOLDER_TOKEN = 'navy';
+
+/** True when a folder id names the Others folder rather than a real subject. */
+export function isOthersFolder(folderId: string | null | undefined): boolean {
+  return folderId === OTHERS_FOLDER_ID;
+}

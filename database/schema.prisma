@@ -877,12 +877,17 @@ model MomentCollection {
   description String?
   startDate   DateTime @map("start_date") @db.Date
   endDate     DateTime @map("end_date") @db.Date
-  subjectId   String   @map("subject_id") @db.Uuid
+  /// Null is the "Others" folder — a moment that belongs to the school rather
+  /// than to a subject. Admin-only, both to file and to read (022).
+  subjectId   String?  @map("subject_id") @db.Uuid
+  /// The moment's own cover image — a private bucket path, signed per request.
+  /// Children's entry photos are never used for this (023).
+  coverPath   String?  @map("cover_path")
   createdBy   String   @map("created_by") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  subject Subject       @relation(fields: [subjectId], references: [id])
+  subject Subject?      @relation(fields: [subjectId], references: [id])
   creator User          @relation("MomentCollectionCreator", fields: [createdBy], references: [id])
   entries MomentEntry[]
 

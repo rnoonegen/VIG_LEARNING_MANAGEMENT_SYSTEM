@@ -3,6 +3,7 @@ import {
   createMomentCollectionSchema,
   createMomentEntrySchema,
   momentCollectionsQuerySchema,
+  momentFoldersQuerySchema,
   momentUploadUrlSchema,
   updateMomentCollectionSchema,
   updateMomentEntrySchema,
@@ -41,6 +42,22 @@ momentCollectionsRouter.post(
   ),
 );
 
+/**
+ * The folders the Moments page opens on — one per subject, plus Others for the
+ * admin. Open to every signed-in role; what is counted inside each is scoped in
+ * the service, exactly as the list below it is.
+ */
+momentCollectionsRouter.get(
+  '/folders',
+  validateQuery(momentFoldersQuerySchema),
+  handler(async (req, res) => {
+    const ctx = auth(req);
+    const query = res.locals.query as { studentId?: string };
+    if (query.studentId) await assertCanReadStudent(ctx, query.studentId);
+    return ok(res, await service.listFolders(ctx, query));
+  }),
+);
+
 // --- Collections -------------------------------------------------------------
 
 momentCollectionsRouter.get(
@@ -48,7 +65,12 @@ momentCollectionsRouter.get(
   validateQuery(momentCollectionsQuerySchema),
   handler(async (req, res) => {
     const ctx = auth(req);
-    const query = res.locals.query as { studentId?: string; subjectId?: string };
+    const query = res.locals.query as {
+      studentId?: string;
+      subjectId?: string;
+      from?: string;
+      to?: string;
+    };
     // Narrowing to a child is only allowed for a child the caller may read.
     if (query.studentId) await assertCanReadStudent(ctx, query.studentId);
     return ok(res, await service.listCollections(ctx, query));
@@ -96,12 +118,13 @@ momentCollectionsRouter.get(
 
 // --- Entries -----------------------------------------------------------------
 
+/** One filled-in form, one entry for each child it was written for. */
 momentCollectionsRouter.post(
   '/:id/entries',
   staffOnly,
   validateBody(createMomentEntrySchema),
   handler(async (req, res) =>
-    ok(res, await service.addEntry(auth(req), req.params.id, req.body), undefined, 201),
+    ok(res, await service.addEntries(auth(req), req.params.id, req.body), undefined, 201),
   ),
 );
 

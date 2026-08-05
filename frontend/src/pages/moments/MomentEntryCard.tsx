@@ -4,6 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Layout';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/ui';
+import { IconAction } from './IconAction';
 
 /**
  * One child inside a moment.
@@ -99,32 +100,6 @@ export function MomentEntryCard({
         </div>
       ) : null}
     </div>
-  );
-}
-
-function IconAction({
-  label,
-  onClick,
-  danger,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      className={cn(
-        'flex h-8 w-8 items-center justify-center rounded-full bg-card/90 text-ink-2 shadow-sm backdrop-blur transition-colors',
-        danger ? 'hover:bg-danger hover:text-white' : 'hover:bg-violet hover:text-white',
-      )}
-    >
-      {children}
-    </button>
   );
 }
 

@@ -17,6 +17,7 @@ import {
   STUDENT_STATUSES,
 } from './enums.js';
 import { LEAVE_STATUSES } from './enums.js';
+import { OTHERS_FOLDER_ID } from './constants.js';
 import { PARENT_RELATIONSHIPS } from './naming.js';
 
 // --- Primitives -------------------------------------------------------------
@@ -625,8 +626,15 @@ export type CreateMomentInput = z.infer<typeof createMomentSchema>;
 // --- Moments as a collection ------------------------------------------------
 
 /**
+ * Where a moment is filed: a real subject, or the admin-only "Others" folder,
+ * which is stored as no subject at all (022).
+ */
+export const momentFolderId = z.union([uuid, z.literal(OTHERS_FOLDER_ID)]);
+
+/**
  * A moment is opened once — heading, why it matters, the period it covers and
- * the subject it belongs to — and then filled in one child at a time.
+ * the subject it belongs to — and then filled in, one child or a whole group at
+ * a time.
  */
 export const createMomentCollectionSchema = z
   .object({
@@ -634,7 +642,9 @@ export const createMomentCollectionSchema = z
     description: z.string().trim().max(2000).optional(),
     startDate: dateKey,
     endDate: dateKey,
-    subjectId: uuid,
+    subjectId: momentFolderId,
+    /** Storage path of the cover the browser already uploaded (AD-04). */
+    coverPath: z.string().trim().min(1).optional(),
   })
   .refine((v) => v.endDate >= v.startDate, {
     message: 'The end date cannot be before the start date',
@@ -649,7 +659,9 @@ export const updateMomentCollectionSchema = z
     description: z.string().trim().max(2000).nullable().optional(),
     startDate: dateKey.optional(),
     endDate: dateKey.optional(),
-    subjectId: uuid.optional(),
+    subjectId: momentFolderId.optional(),
+    /** Null clears the cover and returns the card to its tinted panel. */
+    coverPath: z.string().trim().min(1).nullable().optional(),
   })
   .refine((v) => !v.startDate || !v.endDate || v.endDate >= v.startDate, {
     message: 'The end date cannot be before the start date',
@@ -662,14 +674,20 @@ const momentEntryLink = z.object({
 });
 
 /**
- * One child's entry. The photo is a storage path the browser has already
- * uploaded to (AD-04); the video is a link to wherever it is already hosted.
- * Both are optional on their own, but an entry with neither is just text — so
- * at least one is required.
+ * An entry, written for one child or for a group at once.
+ *
+ * Most of a moment is shared — the same photo, the same sentence about what the
+ * class built — so the form collects it once and `studentIds` says who it is
+ * written for. One entry per child is still what lands in the database; this
+ * only spares the author from typing it out five times.
+ *
+ * The photo is a storage path the browser has already uploaded to (AD-04); the
+ * video is a link to wherever it is already hosted. Both are optional on their
+ * own, but an entry with neither is just text — so at least one is required.
  */
 export const createMomentEntrySchema = z
   .object({
-    studentId: uuid,
+    studentIds: z.array(uuid).min(1, 'Choose at least one student').max(200),
     title: z.string().trim().min(1, 'Give this entry a title').max(140),
     description: z.string().trim().max(4000).optional(),
     photoPath: z.string().trim().min(1).optional(),
@@ -696,9 +714,22 @@ export const updateMomentEntrySchema = z.object({
   referenceLinks: z.array(momentEntryLink).max(10).optional(),
 });
 
+/**
+ * `from`/`to` select the moments that fall *inside* those dates: a moment
+ * matches when its own start and end both sit within the range. Either bound
+ * works alone — `from` on its own means "began on or after this day", `to` on
+ * its own means "had finished by this day".
+ */
 export const momentCollectionsQuerySchema = z.object({
   studentId: uuid.optional(),
-  subjectId: uuid.optional(),
+  subjectId: momentFolderId.optional(),
+  from: dateKey.optional(),
+  to: dateKey.optional(),
+});
+
+/** The folder cards, optionally narrowed to one child (the parent's view). */
+export const momentFoldersQuerySchema = z.object({
+  studentId: uuid.optional(),
 });
 
 // --- Weekly update (M12) ----------------------------------------------------

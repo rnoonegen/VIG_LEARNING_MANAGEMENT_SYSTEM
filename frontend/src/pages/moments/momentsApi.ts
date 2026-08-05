@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   MomentCollectionDetailDto,
   MomentCollectionDto,
+  MomentFolderDto,
   MomentStudentOptionDto,
-  MomentSubjectOptionDto,
 } from '@vig/shared';
 import { fromDateKey } from '@vig/shared';
 import { del, get, patch, post } from '@/lib/api';
@@ -18,32 +18,48 @@ const ROOT = '/moment-collections';
 
 export const momentKeys = {
   all: ['moment-collections'] as const,
+  folders: (params?: Record<string, string | undefined>) =>
+    ['moment-collections', 'folders', params ?? {}] as const,
   list: (params?: Record<string, string | undefined>) =>
     ['moment-collections', 'list', params ?? {}] as const,
   detail: (id: string) => ['moment-collections', 'detail', id] as const,
-  subjects: ['moment-collections', 'subjects'] as const,
   students: (id: string) => ['moment-collections', 'students', id] as const,
 };
 
-export function useMoments(params?: { studentId?: string; subjectId?: string }) {
+/**
+ * The folders the Moments page opens on: one per subject, plus "Others" for an
+ * admin. Every key here starts with `moment-collections`, so a write anywhere in
+ * the section refreshes the counts on the cards along with the lists.
+ */
+export function useMomentFolders(params?: { studentId?: string }) {
+  return useQuery({
+    queryKey: momentKeys.folders(params),
+    queryFn: () => get<MomentFolderDto[]>(`${ROOT}/folders`, params),
+  });
+}
+
+export function useMoments(params?: {
+  studentId?: string;
+  subjectId?: string;
+  /** Date search: matches moments whose own span falls inside these dates. */
+  from?: string;
+  to?: string;
+}) {
   return useQuery({
     queryKey: momentKeys.list(params),
     queryFn: () => get<MomentCollectionDto[]>(ROOT, params),
   });
 }
 
+/** Where a folder lives under whichever role's section is doing the browsing. */
+export function folderPath(basePath: string, folderId: string): string {
+  return `${basePath}/f/${folderId}`;
+}
+
 export function useMoment(id: string) {
   return useQuery({
     queryKey: momentKeys.detail(id),
     queryFn: () => get<MomentCollectionDetailDto>(`${ROOT}/${id}`),
-  });
-}
-
-export function useMomentSubjects(enabled = true) {
-  return useQuery({
-    queryKey: momentKeys.subjects,
-    queryFn: () => get<MomentSubjectOptionDto[]>(`${ROOT}/subjects`),
-    enabled,
   });
 }
 
@@ -117,8 +133,11 @@ export function useDeleteEntry(collectionId: string) {
   );
 }
 
-/** Signed upload target for an entry photo (AD-04 — bytes bypass the API). */
-export async function uploadEntryPhoto(file: File): Promise<string> {
+/**
+ * Signed upload target for a moment image — an entry's photo or a moment's
+ * cover (AD-04 — the bytes bypass the API entirely).
+ */
+export async function uploadMomentPhoto(file: File): Promise<string> {
   const target = await post<{ path: string; uploadUrl: string; token: string }>(
     `${ROOT}/upload-url`,
     { fileName: file.name, mimeType: file.type },

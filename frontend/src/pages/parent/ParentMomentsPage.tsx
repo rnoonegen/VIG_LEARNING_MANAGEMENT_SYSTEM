@@ -1,57 +1,58 @@
-import { Sparkles } from 'lucide-react';
 import { PageHeader } from '@/components/ui/Layout';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
-import { MomentCard } from '@/pages/moments/MomentCard';
-import { useMoments } from '@/pages/moments/momentsApi';
+import { LoadingState } from '@/components/ui/States';
+import { MomentFolderGrid } from '@/pages/moments/MomentFolderGrid';
+import { MomentFolderPage } from '@/pages/moments/MomentFolderPage';
 import { useSelectedChild } from './useChild';
 import { ChildSwitcher } from './ChildSwitcher';
 
 /**
- * The moments a parent's own child appears in.
+ * The moments a parent's own child appears in, filed the way the school files
+ * them: one folder per subject.
  *
  * The child is passed to the API rather than filtered here, and the API returns
  * only that child's entries inside each moment — a parent never learns which
- * other children were part of it (BR-13).
+ * other children were part of it (BR-13). Folders their child has nothing in do
+ * not appear at all, and neither does the school's own "Others" folder.
  */
 export function ParentMomentsPage() {
-  const { children, child, isLoading: loadingChildren, select } = useSelectedChild();
+  const { children, child, isLoading, select } = useSelectedChild();
 
-  if (loadingChildren) return <LoadingState rows={3} />;
+  if (isLoading) return <LoadingState rows={3} />;
   if (!child) return null;
+
+  const firstName = child.fullName.split(' ')[0];
 
   return (
     <div>
       <PageHeader
         title="Moments"
-        description={`What ${child.fullName.split(' ')[0]} has been part of, as their teachers recorded it.`}
+        description={`What ${firstName} has been part of, as their teachers recorded it.`}
       />
       <ChildSwitcher children={children} selectedId={child.id} onSelect={select} />
-      <ChildMoments key={child.id} studentId={child.id} childName={child.fullName} />
+      <MomentFolderGrid
+        key={child.id}
+        basePath="/parent/moments"
+        studentId={child.id}
+        emptyTitle="No moments yet"
+        emptyDescription={`When ${firstName}'s teachers write up a moment, it will appear here with their photos and notes.`}
+      />
     </div>
   );
 }
 
-function ChildMoments({ studentId, childName }: { studentId: string; childName: string }) {
-  const { data, isLoading, isError, refetch } = useMoments({ studentId });
+/** One subject's folder, narrowed to the child the parent is looking at. */
+export function ParentMomentFolderPage() {
+  const { child, isLoading } = useSelectedChild();
 
-  if (isLoading) return <LoadingState rows={3} label="Loading moments" />;
-  if (isError || !data) return <ErrorState onRetry={() => void refetch()} />;
-
-  if (data.length === 0) {
-    return (
-      <EmptyState
-        icon={<Sparkles size={26} />}
-        title="No moments yet"
-        description={`When ${childName.split(' ')[0]}'s teachers write up a moment, it will appear here with their photos and notes.`}
-      />
-    );
-  }
+  if (isLoading) return <LoadingState rows={3} />;
+  if (!child) return null;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {data.map((moment) => (
-        <MomentCard key={moment.id} moment={moment} to={`/parent/moments/${moment.id}`} />
-      ))}
-    </div>
+    <MomentFolderPage
+      key={child.id}
+      basePath="/parent/moments"
+      studentId={child.id}
+      canCreate={false}
+    />
   );
 }
