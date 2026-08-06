@@ -124,6 +124,29 @@
     min-width: 44px;
   }
 
+  /*
+   * Manage controls that ride on top of a card: hidden until the pointer or the
+   * keyboard reaches them, so they never compete with the photograph.
+   *
+   * On a touchscreen there is no hover, so a hidden control is simply an absent
+   * one — the buttons stay visible there rather than being unreachable.
+   */
+  .hover-actions {
+    opacity: 0;
+    transition: opacity 150ms;
+  }
+
+  .group:hover .hover-actions,
+  .hover-actions:focus-within {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .hover-actions {
+      opacity: 1;
+    }
+  }
+
   .card-surface {
     background-color: var(--color-card);
     border: 1px solid var(--color-line);

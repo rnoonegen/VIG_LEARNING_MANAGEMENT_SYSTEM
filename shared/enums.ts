@@ -56,6 +56,19 @@ export type UpdateSource = (typeof UPDATE_SOURCES)[number];
 export const MOMENT_SOURCES = ['CLASS_RECORD', 'MANUAL'] as const;
 export type MomentSource = (typeof MOMENT_SOURCES)[number];
 
+/**
+ * Who an entry inside a moment was written about (024).
+ *
+ * INDIVIDUAL  one child, their own write-up. Choosing several children at once
+ *             is a convenience: each still gets an entry of their own, editable
+ *             and removable without touching anyone else's.
+ * GROUP       one entry, shared. The class built the model together, so there is
+ *             one photograph and one write-up naming everyone who was in it —
+ *             not the same paragraph copied onto twelve cards.
+ */
+export const MOMENT_ENTRY_KINDS = ['INDIVIDUAL', 'GROUP'] as const;
+export type MomentEntryKind = (typeof MOMENT_ENTRY_KINDS)[number];
+
 export const WEEKLY_UPDATE_STATUSES = ['DRAFT', 'PUBLISHED'] as const;
 export type WeeklyUpdateStatus = (typeof WEEKLY_UPDATE_STATUSES)[number];
 

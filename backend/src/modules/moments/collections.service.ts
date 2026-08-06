@@ -5,6 +5,7 @@ import type {
   MomentCollectionDetailDto,
   MomentCollectionDto,
   MomentEntryDto,
+  MomentEntryKind,
   MomentFolderDto,
   MomentStudentOptionDto,
   MomentSubjectOptionDto,
@@ -27,9 +28,20 @@ import type { AuthContext } from '../../types/express.js';
  * Moments, as staff actually author them.
  *
  * A moment is opened once — a heading, why it matters, the period it covers and
- * the subject it sits under — and then filled in one child at a time. Each entry
- * carries a photo, a video link, its own title and description, and any
- * reference links worth keeping.
+ * the subject it sits under — and then filled in. Each entry carries a photo, a
+ * video link, its own title and description, and any reference links worth
+ * keeping.
+ *
+ * An entry is written for one child or for a group (024). An individual entry is
+ * one child's own card, editable and removable without touching anyone else's; a
+ * group entry is a single card naming everyone in it, because "they built the
+ * model together" is one thing that happened rather than twelve. Either way the
+ * audience lives in `moment_entry_students`.
+ *
+ * A child may be in as many entries of a moment as they took part in (025). One
+ * Independence Day is one moment, and the same child dances in a group, speaks
+ * on their own and sings in the choir — so nothing here treats a second entry
+ * for the same child as a mistake.
  *
  * Moments live in folders — one per curriculum subject, plus "Others" for what
  * belongs to the school rather than to a subject. Others is stored as no subject
@@ -40,10 +52,12 @@ import type { AuthContext } from '../../types/express.js';
  *   Admin    every moment, whoever opened it, in every folder including Others.
  *   Teacher  the ones they opened themselves, filed under a subject they hold
  *            the capability for. Never Others.
- *   Parent   any moment their child appears in — and inside it, only their own
- *            child's entry. A parent never learns which other children were
- *            there, which is why the entry filter below is not cosmetic. Never
- *            Others.
+ *   Parent   any moment their child appears in, individual or group — and inside
+ *            it, only the entries their own child is in, with only their own
+ *            child named. A parent never learns which other children were there,
+ *            which is why the entry filter below is not cosmetic, and why a
+ *            group entry reaches them as "your child and eleven others" rather
+ *            than as a roster. Never Others.
  */
 
 /** The folder a moment with no subject sits in. Not a row in `subjects` (022). */
@@ -59,7 +73,15 @@ const collectionInclude = {
   entries: {
     orderBy: { createdAt: 'asc' },
     include: {
-      student: { select: { id: true, fullName: true, avatarPath: true } },
+      // Alphabetical, so a group entry reads as a class list rather than in
+      // whatever order the author happened to tick the boxes.
+      students: {
+        orderBy: { student: { fullName: 'asc' } },
+        select: {
+          studentId: true,
+          student: { select: { id: true, fullName: true, avatarPath: true } },
+        },
+      },
       creator: { select: { fullName: true } },
       links: { orderBy: { displayOrder: 'asc' } },
     },
@@ -68,17 +90,32 @@ const collectionInclude = {
 
 type CollectionRow = Prisma.MomentCollectionGetPayload<{ include: typeof collectionInclude }>;
 
+/** An entry as one caller may read it: the names they may see, and the true total. */
+type VisibleEntry = CollectionRow['entries'][number] & { studentCount: number };
+
 const dateKey = (d: Date) => d.toISOString().slice(0, 10);
 const atUtcMidnight = (key: string) => new Date(`${key}T00:00:00.000Z`);
 
 /**
- * A parent's copy of a moment shows only their own children's entries; everyone
- * else sees the whole thing. Applied before any mapping so a name belonging to
- * another family never reaches a DTO in the first place.
+ * A parent's copy of a moment, narrowed twice over.
+ *
+ * Entries their children are not in drop out entirely; the ones that remain keep
+ * only their own children's names, so a group of twelve reaches a family as
+ * their own child plus a count. Everyone else sees the whole thing. Applied
+ * before any mapping, so a name belonging to another family never reaches a DTO
+ * in the first place.
+ *
+ * `studentCount` is taken before the narrowing and is the honest total — the
+ * card can say "and 11 others" without being able to name one of them.
  */
-function visibleEntries(row: CollectionRow, scope: string[] | 'ALL'): CollectionRow['entries'] {
-  if (scope === 'ALL') return row.entries;
-  return row.entries.filter((e) => scope.includes(e.studentId));
+function visibleEntries(row: CollectionRow, scope: string[] | 'ALL'): VisibleEntry[] {
+  return row.entries
+    .map((e) => ({
+      ...e,
+      studentCount: e.students.length,
+      students: scope === 'ALL' ? e.students : e.students.filter((s) => scope.includes(s.studentId)),
+    }))
+    .filter((e) => e.students.length > 0);
 }
 
 /** A moment is the creator's to change, and the admin's. Nobody else's. */
@@ -91,17 +128,21 @@ function assertCanManage(row: { createdBy: string }, ctx: AuthContext): void {
 }
 
 async function toEntryDto(
-  entries: CollectionRow['entries'],
+  entries: VisibleEntry[],
   photoUrls: Map<string, string>,
 ): Promise<MomentEntryDto[]> {
   return Promise.all(
     entries.map(async (e) => ({
       id: e.id,
-      student: {
-        id: e.student.id,
-        fullName: e.student.fullName,
-        avatarUrl: await signAvatar(e.student.avatarPath),
-      },
+      kind: e.kind,
+      students: await Promise.all(
+        e.students.map(async ({ student }) => ({
+          id: student.id,
+          fullName: student.fullName,
+          avatarUrl: await signAvatar(student.avatarPath),
+        })),
+      ),
+      studentCount: e.studentCount,
       title: e.title,
       description: e.description,
       photoUrl: e.photoPath ? (photoUrls.get(e.photoPath) ?? null) : null,
@@ -115,7 +156,7 @@ async function toEntryDto(
 
 function toSummary(
   row: CollectionRow,
-  entries: CollectionRow['entries'],
+  entries: VisibleEntry[],
   photoUrls: Map<string, string>,
   ctx: AuthContext,
 ): MomentCollectionDto {
@@ -134,7 +175,14 @@ function toSummary(
     // The moment's own cover, never a mosaic of the children's entry photos —
     // browse chrome should not be built out of individual children (023).
     coverPhotoUrl: row.coverPath ? (photoUrls.get(row.coverPath) ?? null) : null,
-    studentNames: entries.map((e) => e.student.fullName),
+    // Who was in this moment, each named once. A child may be in several of its
+    // entries — the speech and the group dance — and the summary line answers
+    // "who took part", not "how many times" (025).
+    studentNames: [
+      ...new Map(
+        entries.flatMap((e) => e.students.map((s) => [s.student.id, s.student.fullName] as const)),
+      ).values(),
+    ],
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -177,19 +225,22 @@ function visibilityWhere(
     where.subjectId = { not: null };
   }
 
+  // "Is this child in this moment" is asked of `entryStudents`, never of the
+  // entries themselves — that is the one question a group entry and an
+  // individual one have to answer identically (024).
   if (ctx.role === 'TEACHER') {
     // A teacher's moments are the ones they opened. Someone else's moment about
     // the same child is not theirs to browse.
     where.createdBy = ctx.userId;
-    if (filters.studentId) where.entries = { some: { studentId: filters.studentId } };
+    if (filters.studentId) where.entryStudents = { some: { studentId: filters.studentId } };
   } else if (ctx.role === 'PARENT') {
     // A parent reaches a moment only through a child of theirs being in it.
     const childIds = scope === 'ALL' ? [] : scope;
-    where.entries = {
+    where.entryStudents = {
       some: { studentId: filters.studentId ? filters.studentId : { in: childIds } },
     };
   } else if (filters.studentId) {
-    where.entries = { some: { studentId: filters.studentId } };
+    where.entryStudents = { some: { studentId: filters.studentId } };
   }
 
   return where;
@@ -220,7 +271,7 @@ export async function listFolders(
       subject: { select: { id: true, name: true, colorToken: true, displayOrder: true } },
       // Only for counting, and for a parent's own-child filter — no photo paths
       // leave here, so a folder card is never built from children's photos.
-      entries: { select: { studentId: true } },
+      entries: { select: { students: { select: { studentId: true } } } },
     },
   });
 
@@ -280,9 +331,13 @@ export async function listFolders(
         })
       : ensure({ ...OTHERS_FOLDER, isOthers: true, displayOrder: Number.MAX_SAFE_INTEGER });
 
-    // A parent's count is their own child's entries, never the whole class —
-    // the same filter that keeps other families out of the detail page.
-    const entries = scope === 'ALL' ? row.entries : row.entries.filter((e) => scope.includes(e.studentId));
+    // A parent's count is the entries their own child is in, never the whole
+    // class — the same filter that keeps other families out of the detail page.
+    // A group entry counts once, as one card is what they will find inside.
+    const entries =
+      scope === 'ALL'
+        ? row.entries
+        : row.entries.filter((e) => e.students.some((s) => scope.includes(s.studentId)));
 
     bucket.momentCount += 1;
     bucket.entryCount += entries.length;
@@ -349,9 +404,12 @@ export async function listCollections(
  * child". So what comes back is the entries themselves, each carrying the moment
  * it belongs to rather than being wrapped in it.
  *
+ * A group entry belongs on every profile it names, so it appears here for each
+ * of them — the same card, not a copy per child.
+ *
  * Visibility is the same predicate the folders and the lists use, so a moment a
  * teacher cannot browse does not reappear here through a child they teach — and
- * a parent still sees their own child's entry only.
+ * a parent still sees their own child's entries only.
  */
 export async function listStudentEntries(
   ctx: AuthContext,
@@ -368,11 +426,13 @@ export async function listStudentEntries(
   });
 
   // Two filters, and both are load-bearing: the scope keeps another family's
-  // child out, and the id narrows a moment full of children down to the one
-  // whose profile this is.
+  // child out, and the id narrows a moment full of children down to the entries
+  // this child is actually in — their own, and any group they were part of.
   const mine = rows.map((row) => ({
     row,
-    entries: visibleEntries(row, scope).filter((e) => e.studentId === studentId),
+    entries: visibleEntries(row, scope).filter((e) =>
+      e.students.some((s) => s.studentId === studentId),
+    ),
   }));
 
   const photoUrls = await signMany(
@@ -467,12 +527,12 @@ export async function listSubjectOptions(ctx: AuthContext): Promise<MomentSubjec
 }
 
 /**
- * The children who can still be added to this moment.
+ * The children who can go into this moment — everyone the caller may see.
  *
- * Everyone the caller may see is returned, with the already-placed ones marked
- * rather than dropped — a name that vanishes reads as a missing child, while a
- * name shown as "already added" answers the question the user is actually
- * asking.
+ * Each comes back with the entries of this moment they are already in. That is
+ * context, not a veto: since 025 a child may be written up as many times in one
+ * moment as they took part in it. Knowing they are already in two entries is
+ * worth showing; refusing them a third is not.
  */
 export async function listStudentOptions(
   ctx: AuthContext,
@@ -496,13 +556,16 @@ export async function listStudentOptions(
       orderBy: { fullName: 'asc' },
       select: { id: true, fullName: true, gradeLabel: true, avatarPath: true },
     }),
-    prisma.momentEntry.findMany({
+    prisma.momentEntryStudent.findMany({
       where: { collectionId },
-      select: { id: true, studentId: true },
+      select: { entryId: true, studentId: true },
     }),
   ]);
 
-  const takenBy = new Map(taken.map((t) => [t.studentId, t.id]));
+  const placed = new Map<string, string[]>();
+  for (const row of taken) {
+    placed.set(row.studentId, [...(placed.get(row.studentId) ?? []), row.entryId]);
+  }
 
   return Promise.all(
     students.map(async (s) => ({
@@ -510,7 +573,7 @@ export async function listStudentOptions(
       fullName: s.fullName,
       gradeLabel: s.gradeLabel,
       avatarUrl: await signAvatar(s.avatarPath),
-      takenByEntryId: takenBy.get(s.id) ?? null,
+      entryIds: placed.get(s.id) ?? [],
     })),
   );
 }
@@ -635,15 +698,18 @@ export async function deleteCollection(ctx: AuthContext, collectionId: string): 
 }
 
 /**
- * Write one entry per chosen child, from a single filled-in form.
+ * Turn one filled-in form into an entry (024).
  *
- * The whole group usually shares the photo and the sentence — "they built the
- * model together" is one write-up, not five — so the author fills it in once and
- * picks everyone it applies to. What lands in the database is unchanged: one row
- * per child, still at most one per moment.
+ *   INDIVIDUAL  one child, one card.
+ *   GROUP       one card naming everyone chosen.
  *
- * All of them or none: the writes share a transaction, so a group that trips the
- * unique index does not leave half the class written up and half not.
+ * Both are a single row with its audience attached; the kind is what the card
+ * reads as, and the schema is what holds each to its own arity — one child for
+ * an individual entry, two or more for a group. So there is no fan-out here and
+ * nothing to make atomic: one create, whichever was asked for.
+ *
+ * Either way a child is in a moment at most once, group and individual alike,
+ * and the unique index on `moment_entry_students` is what makes that true.
  */
 export async function addEntries(
   ctx: AuthContext,
@@ -673,70 +739,107 @@ export async function addEntries(
     }
   }
 
-  // The unique index is the real guard against a duplicate — two people saving
-  // the same child at once both pass this check — but reaching it first turns a
-  // race into a plain 409 naming the children to take back out.
-  const taken = await prisma.momentEntry.findMany({
-    where: { collectionId, studentId: { in: studentIds } },
-    select: { student: { select: { fullName: true } } },
-  });
-  if (taken.length > 0) {
-    const names = taken.map((t) => t.student.fullName).join(', ');
-    throw conflict(
-      taken.length === 1
-        ? `${names} already has an entry in this moment.`
-        : `These students already have an entry in this moment: ${names}.`,
-    );
-  }
-
+  // No check that these children are new to the moment: since 025 they need not
+  // be. The speech and the group dance are both theirs.
   const links = input.referenceLinks.map((link, index) => ({
     label: link.label || null,
     url: link.url,
     displayOrder: index,
   }));
 
-  try {
-    await prisma.$transaction(
-      studentIds.map((studentId) =>
-        prisma.momentEntry.create({
-          data: {
-            collectionId,
-            studentId,
-            title: input.title,
-            description: input.description || null,
-            // The same photo backs every entry in the group — one upload, one
-            // stored object, however many children it was written for.
-            photoPath: input.photoPath || null,
-            videoUrl: input.videoUrl || null,
-            createdBy: ctx.userId,
-            links: { create: links },
-          },
-        }),
-      ),
-    );
-  } catch (err) {
-    if ((err as { code?: string }).code === 'P2002') {
-      throw conflict('One of those students already has an entry in this moment.');
-    }
-    throw err;
-  }
+  await prisma.momentEntry.create({
+    data: {
+      collectionId,
+      kind: input.kind,
+      title: input.title,
+      description: input.description || null,
+      // One upload, one stored object, however many children the card names.
+      photoPath: input.photoPath || null,
+      videoUrl: input.videoUrl || null,
+      createdBy: ctx.userId,
+      links: { create: links },
+      students: { create: studentIds.map((studentId) => ({ studentId, collectionId })) },
+    },
+  });
 
   await audit({
     actorId: ctx.userId,
     action: 'MOMENT_ENTRY_ADDED',
     entity: 'MomentCollection',
     entityId: collectionId,
-    after: { studentIds, students: studentIds.length, title: input.title },
+    after: { kind: input.kind, studentIds, students: studentIds.length, title: input.title },
   });
 
   return getCollection(ctx, collectionId);
 }
 
+/**
+ * Work out what changing a group's roster would mean, and refuse it if it cannot
+ * be allowed. Returns null when the caller is not changing the roster at all.
+ *
+ * The checks mirror the ones adding a child goes through, with one deliberate
+ * asymmetry: a child may only be *added* if the caller can see them, but anyone
+ * may be *taken out* of an entry the caller manages. Requiring scope to remove
+ * would strand a teacher who inherited a name they cannot read — and they can
+ * already delete the whole entry, so it would guard nothing.
+ */
+async function plannedRoster(
+  ctx: AuthContext,
+  entry: { kind: MomentEntryKind; students: Array<{ studentId: string }> },
+  studentIds: string[] | undefined,
+): Promise<{ added: string[]; removed: string[] } | null> {
+  if (!studentIds) return null;
+
+  if (entry.kind !== 'GROUP') {
+    throw conflict('Who an individual entry is for cannot be changed. Remove it and add it again.');
+  }
+
+  const wanted = [...new Set(studentIds)];
+  if (wanted.length < 2) {
+    throw conflict('A group entry needs at least two students. Remove it instead to take it out.');
+  }
+
+  const current = new Set(entry.students.map((s) => s.studentId));
+  const added = wanted.filter((id) => !current.has(id));
+  const removed = [...current].filter((id) => !wanted.includes(id));
+  if (added.length === 0 && removed.length === 0) return null;
+
+  const scope = await readableStudentIds(ctx);
+  if (scope !== 'ALL') {
+    const outside = added.filter((id) => !scope.includes(id));
+    if (outside.length > 0) {
+      throw forbidden(
+        outside.length === 1
+          ? 'One of those students is not one of yours.'
+          : `${outside.length} of those students are not yours.`,
+      );
+    }
+  }
+
+  // A child already in another entry of this moment may still join this one —
+  // the group dance does not disqualify them from the choir (025).
+  return { added, removed };
+}
+
+/**
+ * Edit an entry, including who is in it.
+ *
+ * A group's membership is the one part of an entry that was previously settled
+ * for good, and it is exactly the part that gets it wrong: someone was away that
+ * afternoon, someone else was left off. So `studentIds` replaces the whole roster
+ * of a group entry — a full list rather than a delta, because that is what the
+ * form has and it removes any question of which end a name was meant to go.
+ *
+ * An individual entry's child stays fixed. Moving a write-up from one child to
+ * another is not an edit of that write-up, and doing it by accident would put
+ * one family's photograph on another family's card.
+ */
 export async function updateEntry(
   ctx: AuthContext,
   collectionId: string,
   entryId: string,
   data: {
+    studentIds?: string[];
     title?: string;
     description?: string | null;
     photoPath?: string | null;
@@ -746,7 +849,14 @@ export async function updateEntry(
 ): Promise<MomentCollectionDetailDto> {
   const entry = await prisma.momentEntry.findFirst({
     where: { id: entryId, collectionId },
-    select: { id: true, photoPath: true, videoUrl: true, collection: { select: { createdBy: true } } },
+    select: {
+      id: true,
+      kind: true,
+      photoPath: true,
+      videoUrl: true,
+      students: { select: { studentId: true } },
+      collection: { select: { createdBy: true } },
+    },
   });
   if (!entry) throw notFound('Entry');
   assertCanManage(entry.collection, ctx);
@@ -757,7 +867,18 @@ export async function updateEntry(
   const videoUrl = data.videoUrl !== undefined ? data.videoUrl : entry.videoUrl;
   if (!photoPath && !videoUrl) throw conflict('An entry needs a photo or a video link.');
 
+  const roster = await plannedRoster(ctx, entry, data.studentIds);
+
   await prisma.$transaction(async (tx) => {
+    if (roster) {
+      await tx.momentEntryStudent.deleteMany({
+        where: { entryId, studentId: { in: roster.removed } },
+      });
+      await tx.momentEntryStudent.createMany({
+        data: roster.added.map((studentId) => ({ entryId, studentId, collectionId })),
+      });
+    }
+
     await tx.momentEntry.update({
       where: { id: entryId },
       data: {
@@ -790,7 +911,9 @@ export async function updateEntry(
     action: 'MOMENT_ENTRY_UPDATED',
     entity: 'MomentEntry',
     entityId: entryId,
-    after: data as Prisma.InputJsonValue,
+    // Who joined and who left, rather than only the list that was sent — the
+    // question asked of an audit log later is "who was taken out of this".
+    after: { ...data, ...(roster ?? {}) } as Prisma.InputJsonValue,
   });
 
   return getCollection(ctx, collectionId);
@@ -803,11 +926,18 @@ export async function deleteEntry(
 ): Promise<MomentCollectionDetailDto> {
   const entry = await prisma.momentEntry.findFirst({
     where: { id: entryId, collectionId },
-    select: { id: true, studentId: true, collection: { select: { createdBy: true } } },
+    select: {
+      id: true,
+      kind: true,
+      students: { select: { studentId: true } },
+      collection: { select: { createdBy: true } },
+    },
   });
   if (!entry) throw notFound('Entry');
   assertCanManage(entry.collection, ctx);
 
+  // Removing a group entry frees everyone in it, which is why the audit records
+  // the whole roster rather than a single child.
   await prisma.momentEntry.delete({ where: { id: entryId } });
 
   await audit({
@@ -815,7 +945,7 @@ export async function deleteEntry(
     action: 'MOMENT_ENTRY_REMOVED',
     entity: 'MomentCollection',
     entityId: collectionId,
-    before: { entryId, studentId: entry.studentId },
+    before: { entryId, kind: entry.kind, studentIds: entry.students.map((s) => s.studentId) },
   });
 
   return getCollection(ctx, collectionId);

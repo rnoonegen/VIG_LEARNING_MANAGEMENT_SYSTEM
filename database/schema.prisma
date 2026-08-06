@@ -101,6 +101,12 @@ enum MomentSource {
   MANUAL
 }
 
+/// One child's own write-up, or one shared by everyone it names (024).
+enum MomentEntryKind {
+  INDIVIDUAL
+  GROUP
+}
+
 enum WeeklyUpdateStatus {
   DRAFT
   PUBLISHED
@@ -318,7 +324,7 @@ model Student {
   developmentObs   DevelopmentObservation[]
   stageChanges     DevelopmentStageChange[]
   moments          MomentStudent[]
-  momentEntries    MomentEntry[]
+  momentEntries    MomentEntryStudent[]
   weeklyUpdates    WeeklyUpdate[]
 
   @@index([status])
@@ -887,9 +893,12 @@ model MomentCollection {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  subject Subject?      @relation(fields: [subjectId], references: [id])
-  creator User          @relation("MomentCollectionCreator", fields: [createdBy], references: [id])
-  entries MomentEntry[]
+  subject       Subject?             @relation(fields: [subjectId], references: [id])
+  creator       User                 @relation("MomentCollectionCreator", fields: [createdBy], references: [id])
+  entries       MomentEntry[]
+  /// Every child in this moment, whichever entry put them there — the one place
+  /// "does this moment include this child" has to be asked (024).
+  entryStudents MomentEntryStudent[]
 
   @@index([createdBy, startDate(sort: Desc)])
   @@index([subjectId])
@@ -898,29 +907,55 @@ model MomentCollection {
 }
 
 model MomentEntry {
-  id           String   @id @default(uuid()) @db.Uuid
-  collectionId String   @map("collection_id") @db.Uuid
-  studentId    String   @map("student_id") @db.Uuid
+  id           String          @id @default(uuid()) @db.Uuid
+  collectionId String          @map("collection_id") @db.Uuid
+  /// Individual — one child, their own card. Group — one card naming everyone
+  /// it was written for. The audience lives in `students` either way (024).
+  kind         MomentEntryKind @default(INDIVIDUAL)
   title        String
   description  String?
   /// Private bucket path, never a URL — reads are signed per request (AD-04).
-  photoPath    String?  @map("photo_path")
+  photoPath    String?         @map("photo_path")
   /// Video lives wherever the school already hosts it; we keep the link only.
-  videoUrl     String?  @map("video_url")
-  createdBy    String   @map("created_by") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  videoUrl     String?         @map("video_url")
+  createdBy    String          @map("created_by") @db.Uuid
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  collection MomentCollection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  student    Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  creator    User              @relation("MomentEntryCreator", fields: [createdBy], references: [id])
+  collection MomentCollection     @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  creator    User                 @relation("MomentEntryCreator", fields: [createdBy], references: [id])
+  students   MomentEntryStudent[]
   links      MomentEntryLink[]
 
-  // One child, one entry per moment — the rule the form describes by greying a
-  // name out, held here so it is true however the row arrives.
-  @@unique([collectionId, studentId])
-  @@index([studentId])
+  @@index([collectionId])
   @@map("moment_entries")
+}
+
+/// Who an entry was written for: one row for an individual entry, one per child
+/// for a group (024).
+///
+/// A child may appear in as many entries of a moment as they took part in (025).
+/// One Independence Day is one moment, and a child can dance in a group, give a
+/// speech on their own and sing in the choir — three entries, one child, and
+/// nothing wrong with it. Only being named twice *inside the same entry* is
+/// meaningless, which is what the primary key rules out.
+///
+/// `collectionId` is carried here as well as on the entry so the visibility
+/// queries have a single table to ask "is this child in this moment", with no
+/// regard for how the entry was written.
+model MomentEntryStudent {
+  entryId      String @map("entry_id") @db.Uuid
+  studentId    String @map("student_id") @db.Uuid
+  collectionId String @map("collection_id") @db.Uuid
+
+  entry      MomentEntry      @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  student    Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  collection MomentCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@id([entryId, studentId])
+  @@index([collectionId, studentId])
+  @@index([studentId])
+  @@map("moment_entry_students")
 }
 
 model MomentEntryLink {

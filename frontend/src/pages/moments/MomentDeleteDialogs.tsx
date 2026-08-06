@@ -78,9 +78,14 @@ export function DeleteEntryConfirm({
     }
   };
 
+  // A group entry is one card covering several children, so removing it takes it
+  // away from all of them — the sentence has to say so before it happens (024).
+  const group = entry.kind === 'GROUP';
+  const who = entry.students[0]?.fullName ?? 'This student';
+
   return (
     <ConfirmShell
-      title="Remove this entry?"
+      title={group ? 'Remove this group entry?' : 'Remove this entry?'}
       confirmLabel="Remove entry"
       pending={deleteEntry.isPending}
       pendingLabel="Deleting…"
@@ -88,8 +93,17 @@ export function DeleteEntryConfirm({
       onConfirm={run}
       onCancel={onCancel}
     >
-      {entry.student.fullName}’s entry — “{entry.title}” — will be deleted, along with its photo.
-      They can be added to this moment again afterwards.
+      {group ? (
+        <>
+          “{entry.title}” — the entry shared by all {entry.studentCount} students in it — will be
+          deleted, along with its photo. Any other entries they are in stay as they are.
+        </>
+      ) : (
+        <>
+          {who}’s entry — “{entry.title}” — will be deleted, along with its photo. Any other entries
+          they are in stay as they are.
+        </>
+      )}
     </ConfirmShell>
   );
 }

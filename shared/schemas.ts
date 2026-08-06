@@ -12,6 +12,7 @@ import {
   CURRICULUM_STATUSES,
   DEV_CATEGORIES,
   DEV_STAGES,
+  MOMENT_ENTRY_KINDS,
   ROLES,
   SKILL_STATUSES,
   STUDENT_STATUSES,
@@ -674,12 +675,22 @@ const momentEntryLink = z.object({
 });
 
 /**
- * An entry, written for one child or for a group at once.
+ * An entry, written for one child or for a group at once (024).
  *
- * Most of a moment is shared — the same photo, the same sentence about what the
- * class built — so the form collects it once and `studentIds` says who it is
- * written for. One entry per child is still what lands in the database; this
- * only spares the author from typing it out five times.
+ * `kind` decides what the one filled-in form becomes, and it is the whole of the
+ * difference:
+ *
+ *   INDIVIDUAL  one child, one card. Exactly one — a write-up about one child is
+ *               about them, and choosing five would silently produce five cards
+ *               saying the same thing, which is what GROUP is for.
+ *   GROUP       a single entry naming everyone in it. One photograph, one
+ *               write-up, one card — because "they built the model together" is
+ *               one thing that happened, not twelve.
+ *
+ * A child may be in as many entries of a moment as they took part in (025): on
+ * one Independence Day they dance in a group, speak on their own and sing in the
+ * choir. The kinds mix freely — being in a group entry is no bar to an
+ * individual one in the same moment.
  *
  * The photo is a storage path the browser has already uploaded to (AD-04); the
  * video is a link to wherever it is already hosted. Both are optional on their
@@ -687,6 +698,7 @@ const momentEntryLink = z.object({
  */
 export const createMomentEntrySchema = z
   .object({
+    kind: z.enum(MOMENT_ENTRY_KINDS).default('INDIVIDUAL'),
     studentIds: z.array(uuid).min(1, 'Choose at least one student').max(200),
     title: z.string().trim().min(1, 'Give this entry a title').max(140),
     description: z.string().trim().max(4000).optional(),
@@ -697,11 +709,36 @@ export const createMomentEntrySchema = z
   .refine((v) => Boolean(v.photoPath || v.videoUrl), {
     message: 'Add a photo or a video link',
     path: ['photoPath'],
+  })
+  // A group of one is an individual entry wearing the wrong label — and it would
+  // read as one on the card, so it is refused rather than quietly rewritten.
+  .refine((v) => v.kind !== 'GROUP' || new Set(v.studentIds).size >= 2, {
+    message: 'A group entry needs at least two students — or switch to individual',
+    path: ['studentIds'],
+  })
+  // And the mirror of it: several children on an individual entry would have to
+  // become several cards, which is a group by another name.
+  .refine((v) => v.kind !== 'INDIVIDUAL' || new Set(v.studentIds).size === 1, {
+    message: 'An individual entry is for one student — choose Group to write up several at once',
+    path: ['studentIds'],
   });
 export type CreateMomentEntryInput = z.infer<typeof createMomentEntrySchema>;
 
-/** The child an entry belongs to is settled at creation and never moves. */
+/**
+ * Editing an entry, including who is in it.
+ *
+ * `studentIds` replaces the whole membership of a *group* entry — someone left
+ * out when it was written can be added, and someone who was not really there can
+ * be taken out. It is the full list, not a delta, so the form sends what the
+ * entry should end up with.
+ *
+ * An individual entry's child is still fixed: reassigning a write-up from one
+ * child to another is not an edit, and the service refuses `studentIds` there.
+ * The arity rule (a group keeps at least two) cannot be checked here because the
+ * kind is not in the body — the service, which knows it, enforces it.
+ */
 export const updateMomentEntrySchema = z.object({
+  studentIds: z.array(uuid).min(1, 'Choose at least one student').max(200).optional(),
   title: z.string().trim().min(1, 'Give this entry a title').max(140).optional(),
   description: z.string().trim().max(4000).nullable().optional(),
   photoPath: z.string().trim().min(1).nullable().optional(),

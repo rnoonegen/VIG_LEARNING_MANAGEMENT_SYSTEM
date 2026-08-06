@@ -118,7 +118,10 @@ momentCollectionsRouter.get(
 
 // --- Entries -----------------------------------------------------------------
 
-/** One filled-in form, one entry for each child it was written for. */
+/**
+ * One filled-in form: an entry for each child it was written for, or one shared
+ * entry naming them all — `kind` decides which (024).
+ */
 momentCollectionsRouter.post(
   '/:id/entries',
   staffOnly,

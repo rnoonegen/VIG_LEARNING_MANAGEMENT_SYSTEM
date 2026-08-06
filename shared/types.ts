@@ -13,6 +13,7 @@ import type {
   DevCategory,
   DevStage,
   LeaveStatus,
+  MomentEntryKind,
   NotificationType,
   OccurrenceStatus,
   Role,
@@ -733,10 +734,27 @@ export interface MomentEntryLinkDto {
   url: string;
 }
 
-/** One child's place inside a moment. */
+/** A child inside an entry: enough to recognise them, nothing more. */
+export interface MomentEntryStudentDto {
+  id: string;
+  fullName: string;
+  avatarUrl: string | null;
+}
+
+/**
+ * One write-up inside a moment — for a single child, or for a group at once (024).
+ *
+ * `students` is always populated: exactly one name for an individual entry, and
+ * everyone it was written for on a group one. A parent's copy is narrowed to
+ * their own children, so `studentCount` is the honest total — "Aarav and 11
+ * others" can be said without naming another family's child.
+ */
 export interface MomentEntryDto {
   id: string;
-  student: { id: string; fullName: string; avatarUrl: string | null };
+  kind: MomentEntryKind;
+  students: MomentEntryStudentDto[];
+  /** Everyone the entry covers, including children this caller may not name. */
+  studentCount: number;
   title: string;
   description: string | null;
   /** Short-lived signed URL, issued only after the caller's access was checked. */
@@ -812,14 +830,20 @@ export interface MomentFolderDto {
   previewPhotoUrls: string[];
 }
 
-/** A child who may still be added to a moment, plus why they cannot. */
+/**
+ * A child who can go into this moment — which, since 025, is all of them.
+ *
+ * `entryIds` are the entries of this moment they are already in. Nobody is
+ * barred by it: a child can dance in a group, speak on their own and sing in the
+ * choir, all within one moment. It is there so the form can say "already in 2
+ * entries" — useful to know, and not the same thing as "no".
+ */
 export interface MomentStudentOptionDto {
   id: string;
   fullName: string;
   avatarUrl: string | null;
   gradeLabel: string | null;
-  /** Set when the child already has an entry in this moment. */
-  takenByEntryId: string | null;
+  entryIds: string[];
 }
 
 /** The subjects this caller may file a moment under. */

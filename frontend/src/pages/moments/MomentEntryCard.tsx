@@ -1,18 +1,26 @@
-import { ExternalLink, Film, ImageOff, Link2, Pencil, PlayCircle, Trash2 } from 'lucide-react';
+import { ExternalLink, Film, ImageOff, Link2, Pencil, PlayCircle, Trash2, Users } from 'lucide-react';
 import type { MomentEntryDto } from '@vig/shared';
 import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Layout';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/ui';
 import { IconAction } from './IconAction';
+import { formatEntryAudience } from './momentsApi';
+
+/** At most three faces on a card — past that it is a crowd, not a recognition aid. */
+const FACES = 3;
 
 /**
- * One child inside a moment.
+ * One entry inside a moment — a single child's, or a group's (024).
  *
- * The photo is the card, with the child's name riding on a scrim across the
- * bottom so a parent scanning the page recognises their own child before
- * reading a word. Manage controls only appear for someone who can actually use
- * them, and only on hover or focus, so they never compete with the photograph.
+ * The photo is the card, with the names riding on a scrim across the bottom so a
+ * parent scanning the page recognises their own child before reading a word. A
+ * group shows the first few faces and says how many more there are; a parent's
+ * copy of that group names only their own child, so the count is doing the work
+ * the missing names cannot.
+ *
+ * Manage controls only appear for someone who can actually use them, and only on
+ * hover or focus, so they never compete with the photograph.
  */
 export function MomentEntryCard({
   entry,
@@ -27,6 +35,9 @@ export function MomentEntryCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const audience = formatEntryAudience(entry);
+  const faces = entry.students.slice(0, FACES);
+
   return (
     <div className="group relative overflow-hidden rounded-[16px] border border-line bg-card transition-shadow hover:shadow-[0_12px_28px_-18px_rgba(17,22,92,0.4)]">
       <button type="button" onClick={onOpen} className="block w-full text-left">
@@ -47,20 +58,37 @@ export function MomentEntryCard({
             </span>
           )}
 
-          {entry.videoUrl ? (
-            <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-navy/55 px-2 py-1 text-[10px] font-medium text-white backdrop-blur">
-              <PlayCircle size={12} />
-              Video
-            </span>
-          ) : null}
+          <span className="absolute right-2 top-2 flex items-center gap-1.5">
+            {entry.kind === 'GROUP' ? (
+              <span className="flex items-center gap-1 rounded-full bg-violet/85 px-2 py-1 text-[10px] font-medium text-white backdrop-blur">
+                <Users size={12} />
+                Group of {entry.studentCount}
+              </span>
+            ) : null}
+            {entry.videoUrl ? (
+              <span className="flex items-center gap-1 rounded-full bg-navy/55 px-2 py-1 text-[10px] font-medium text-white backdrop-blur">
+                <PlayCircle size={12} />
+                Video
+              </span>
+            ) : null}
+          </span>
 
-          {/* The name sits on the image, so it needs its own contrast rather
+          {/* The names sit on the image, so they need their own contrast rather
               than borrowing the photograph's. */}
           <span className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-navy/85 via-navy/45 to-transparent px-3 pb-2.5 pt-8">
-            <Avatar name={entry.student.fullName} url={entry.student.avatarUrl} size={26} />
-            <span className="truncate text-xs font-semibold text-white">
-              {entry.student.fullName}
+            {/* Overlapped, so three faces cost roughly the width of one and a
+                half and the name beside them keeps its room. */}
+            <span className="flex shrink-0 items-center">
+              {faces.map((student, index) => (
+                <span
+                  key={student.id}
+                  className={cn('rounded-full ring-2 ring-navy/40', index > 0 && '-ml-2.5')}
+                >
+                  <Avatar name={student.fullName} url={student.avatarUrl} size={26} />
+                </span>
+              ))}
             </span>
+            <span className="truncate text-xs font-semibold text-white">{audience}</span>
           </span>
         </span>
 
@@ -81,20 +109,11 @@ export function MomentEntryCard({
       </button>
 
       {canManage ? (
-        <div
-          className={cn(
-            'absolute left-2 top-2 flex gap-1 opacity-0 transition-opacity',
-            'group-hover:opacity-100 focus-within:opacity-100',
-          )}
-        >
-          <IconAction label={`Edit ${entry.student.fullName}'s entry`} onClick={onEdit}>
+        <div className="hover-actions absolute left-2 top-2 flex gap-1">
+          <IconAction label={`Edit the entry for ${audience}`} onClick={onEdit}>
             <Pencil size={14} />
           </IconAction>
-          <IconAction
-            label={`Remove ${entry.student.fullName}'s entry`}
-            onClick={onDelete}
-            danger
-          >
+          <IconAction label={`Remove the entry for ${audience}`} onClick={onDelete} danger>
             <Trash2 size={14} />
           </IconAction>
         </div>
@@ -103,20 +122,34 @@ export function MomentEntryCard({
   );
 }
 
-/** The entry at full size: the photo, everything written about it, every link. */
+/**
+ * The entry at full size: the photo, everything written about it, every link.
+ *
+ * Editing and removing are offered here as well as on the card, because the
+ * card's controls appear on hover — which is no offer at all on a touchscreen,
+ * and easy to miss anywhere else. Opening the entry is how anyone gets a proper
+ * look at it, so it is also where the two things you might then want to do live.
+ */
 export function MomentEntryDetail({
   entry,
   canManage,
   onClose,
   onEdit,
+  onDelete,
 }: {
   entry: MomentEntryDto;
   canManage: boolean;
   onClose: () => void;
   /** Absent where the entry is only being read, as on a student's profile. */
   onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   const editable = canManage && Boolean(onEdit);
+  const removable = canManage && Boolean(onDelete);
+  // Everyone in the entry this reader is not allowed to name — a parent looking
+  // at a group of twelve sees their own child and a count of the rest.
+  const unnamed = Math.max(0, entry.studentCount - entry.students.length);
+  const roster = entry.students.length > 1 || unnamed > 0;
 
   return (
     <Modal
@@ -124,16 +157,30 @@ export function MomentEntryDetail({
       onClose={onClose}
       wide
       title={entry.title}
-      description={entry.student.fullName}
+      description={formatEntryAudience(entry)}
       footer={
-        editable ? (
+        editable || removable ? (
           <>
+            {/* Destructive first and visually apart from the primary action, so
+                "remove" is never the button next to the one you meant. */}
+            {removable ? (
+              <Button
+                variant="danger"
+                icon={<Trash2 size={15} />}
+                onClick={onDelete}
+                className="sm:mr-auto"
+              >
+                Remove entry
+              </Button>
+            ) : null}
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
-            <Button icon={<Pencil size={15} />} onClick={onEdit}>
-              Edit entry
-            </Button>
+            {editable ? (
+              <Button icon={<Pencil size={15} />} onClick={onEdit}>
+                Edit entry
+              </Button>
+            ) : null}
           </>
         ) : undefined
       }
@@ -145,6 +192,28 @@ export function MomentEntryDetail({
             alt=""
             className="max-h-[55vh] w-full rounded-[14px] bg-lavender object-contain"
           />
+        ) : null}
+
+        {/* A group's roster, in full. One name is already in the subtitle above,
+            so it is not repeated as a list of one. */}
+        {roster ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {entry.students.map((student) => (
+              <span
+                key={student.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-line bg-lavender-2 py-1 pl-1 pr-3 text-xs text-ink-2"
+              >
+                <Avatar name={student.fullName} url={student.avatarUrl} size={22} />
+                <span className="truncate">{student.fullName}</span>
+              </span>
+            ))}
+            {unnamed > 0 ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs text-ink-3">
+                <Users size={12} />
+                and {unnamed} other{unnamed === 1 ? '' : 's'}
+              </span>
+            ) : null}
+          </div>
         ) : null}
 
         {entry.videoUrl ? (

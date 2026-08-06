@@ -84,7 +84,7 @@ export function MomentDetailPage({ basePath }: { basePath: string }) {
           title={moment.canManage ? 'No students added yet' : 'Nothing here yet'}
           description={
             moment.canManage
-              ? 'Write it up once and choose everyone it applies to — each child gets their own entry, and each child can only be added once.'
+              ? 'Write up one child on their own, or a group together. A child can be in as many entries as they took part in — the group dance and the solo speech both belong here.'
               : 'Photos and notes from this moment will appear here once they are added.'
           }
           action={moment.canManage ? addButton : undefined}
@@ -123,6 +123,10 @@ export function MomentDetailPage({ basePath }: { basePath: string }) {
           onClose={() => setOpenEntry(null)}
           onEdit={() => {
             setEditingEntry(openEntry);
+            setOpenEntry(null);
+          }}
+          onDelete={() => {
+            setDeletingEntry(openEntry);
             setOpenEntry(null);
           }}
         />

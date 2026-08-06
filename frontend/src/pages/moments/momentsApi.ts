@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   MomentCollectionDetailDto,
   MomentCollectionDto,
+  MomentEntryDto,
   MomentFolderDto,
   MomentStudentOptionDto,
   StudentMomentEntryDto,
@@ -200,4 +201,34 @@ export function formatNameList(names: string[], max = 2): string {
   if (firsts.length === 0) return 'No students yet';
   if (firsts.length <= max) return new Intl.ListFormat('en-GB').format(firsts);
   return `${firsts.slice(0, max).join(', ')} and ${firsts.length - max} more`;
+}
+
+/**
+ * Who an entry was written for, as a card can say it.
+ *
+ * One child gets their full name, because an individual entry is about them
+ * rather than about a list. A group gets first names and a count.
+ *
+ * `studentCount` is trusted over the names, not derived from them: a parent's
+ * copy of a group entry names only their own children, so "Aarav and 11 others"
+ * has to be sayable when the other eleven are another family's and cannot be
+ * named at all.
+ */
+export function formatEntryAudience(
+  entry: Pick<MomentEntryDto, 'students' | 'studentCount'>,
+  max = 2,
+): string {
+  const names = entry.students.map((s) => s.fullName);
+  const unnamed = Math.max(0, entry.studentCount - names.length);
+
+  if (names.length === 0) {
+    return `${entry.studentCount} student${entry.studentCount === 1 ? '' : 's'}`;
+  }
+  if (names.length === 1 && unnamed === 0) return names[0] ?? '';
+
+  const firsts = names.map((n) => n.split(' ')[0] ?? n);
+  const shown = firsts.slice(0, max);
+  const others = unnamed + (firsts.length - shown.length);
+  if (others === 0) return new Intl.ListFormat('en-GB').format(shown);
+  return `${shown.join(', ')} and ${others} other${others === 1 ? '' : 's'}`;
 }

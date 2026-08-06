@@ -81,12 +81,7 @@ export function MomentCard({
       </div>
 
       {manageable ? (
-        <div
-          className={cn(
-            'absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity',
-            'group-hover:opacity-100 focus-within:opacity-100',
-          )}
-        >
+        <div className="hover-actions absolute right-2 top-2 z-10 flex gap-1">
           <IconAction label={`Edit ${moment.heading}`} onClick={onEdit!}>
             <Pencil size={14} />
           </IconAction>
