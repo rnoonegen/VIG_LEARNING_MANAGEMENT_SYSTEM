@@ -15,6 +15,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Runs before any test module is imported, which is the only place early
+    // enough to matter: `env.ts` validates on import and throws without a
+    // DATABASE_URL, and .env is not committed.
+    setupFiles: ['./vitest.setup.ts'],
     // These are pure-function tests over the locked business rules — no database,
     // no network, so they stay fast enough to run on every save.
     testTimeout: 10_000,
