@@ -15,7 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { NotificationDto } from '@vig/shared';
+import type { UnreadCountDto } from '@vig/shared';
 import { useAuth } from '@/app/AuthProvider';
 import { get } from '@/lib/api';
 import { cn } from '@/lib/ui';
@@ -61,16 +61,22 @@ export const PARENT_NAV: NavItem[] = [
   { to: '/parent/moments', label: 'Moments', icon: <Image size={ICON_SIZE} /> },
 ];
 
+/**
+ * The badge on the bell.
+ *
+ * Counted by the server, not by filtering a downloaded list: the count is zero
+ * for an account that has turned notifications off (Settings → Notifications),
+ * and a client counting unread rows itself would keep showing the dot the
+ * switch was meant to clear. It also stops the shell pulling a hundred
+ * notifications a minute to render one number.
+ */
 function useUnreadCount() {
   const { data } = useQuery({
     queryKey: ['notifications', 'unread'],
-    queryFn: async () => {
-      const items = await get<NotificationDto[]>('/notifications');
-      return items.filter((n) => !n.readAt).length;
-    },
+    queryFn: () => get<UnreadCountDto>('/notifications/unread-count'),
     refetchInterval: 60_000,
   });
-  return data ?? 0;
+  return data?.unread ?? 0;
 }
 
 function Wordmark() {

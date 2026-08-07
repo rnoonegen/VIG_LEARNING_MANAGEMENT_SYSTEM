@@ -18,6 +18,12 @@ import { Card, CardHeader } from './ui/Card';
  * What arrives is fixed by BR-14 and is not configurable here — parents get one
  * push a week, teachers get scheduling and class-record notices, admins get
  * operational issues. This screen only answers "does this device get them".
+ *
+ * Whether the *account* wants notifying at all is the switch above this one in
+ * Settings, which hides this card entirely when it is off — so everything here
+ * can assume it is being asked a question worth answering. Muting does not
+ * unregister anything: the browser permission is the user's to keep, and the
+ * device is still here when they come back.
  */
 export function PushSettings() {
   const [subscribed, setSubscribed] = useState(false);

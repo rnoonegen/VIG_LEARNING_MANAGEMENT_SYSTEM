@@ -797,6 +797,14 @@ export const pushUnsubscribeSchema = z.object({
   endpoint: z.string().url(),
 });
 
+// --- Notification preferences -----------------------------------------------
+
+/** One switch, sent whole — there is nothing to patch partially. */
+export const updateNotificationPrefsSchema = z.object({
+  notificationsEnabled: z.boolean(),
+});
+export type UpdateNotificationPrefsInput = z.infer<typeof updateNotificationPrefsSchema>;
+
 // --- Query params -----------------------------------------------------------
 
 export const scheduleQuerySchema = z.object({

@@ -1,6 +1,7 @@
 import type { PushStatusDto, PushSubscribeInput } from '@vig/shared';
 import { prisma } from '../../prisma.js';
 import { env } from '../../env.js';
+import { notificationsEnabled } from './service.js';
 
 /**
  * Web push (D3 / F22).
@@ -64,12 +65,18 @@ export async function unsubscribe(userId: string, endpoint: string): Promise<voi
  * No-ops unless the flag is on AND a keypair exists. The `web-push` library is
  * not a dependency of this build — wiring it is the flagged follow-up (M13),
  * and this function is the single place that changes.
+ *
+ * Also no-ops for an account that has turned notifications off in Settings.
+ * That check belongs here rather than at each caller: this is the only place a
+ * device is actually interrupted, so it is the only place that can honour the
+ * switch for every sender, including the ones written after it.
  */
 export async function deliver(
   userId: string,
   payload: { title: string; body: string; url?: string },
 ): Promise<{ sent: number; skipped: boolean }> {
   if (!env.FEATURE_WEB_PUSH || !pushConfigured()) return { sent: 0, skipped: true };
+  if (!(await notificationsEnabled(userId))) return { sent: 0, skipped: true };
 
   const subs = await prisma.pushSubscription.findMany({ where: { userId } });
   if (subs.length === 0) return { sent: 0, skipped: false };

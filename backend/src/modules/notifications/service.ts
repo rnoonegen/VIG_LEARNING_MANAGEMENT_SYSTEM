@@ -1,6 +1,14 @@
-import type { NotificationDto, NotificationType, Role } from '@vig/shared';
+import type {
+  NotificationDto,
+  NotificationPrefsDto,
+  NotificationType,
+  Role,
+  UpdateNotificationPrefsInput,
+} from '@vig/shared';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../prisma.js';
+import { notFound } from '../../lib/errors.js';
+import { audit } from '../../lib/audit.js';
 
 /**
  * Notification volume is a locked product rule, not a preference (BR-14):
@@ -93,8 +101,69 @@ export async function list(userId: string): Promise<NotificationDto[]> {
   }));
 }
 
+/**
+ * What the bell shows.
+ *
+ * Zero while the account is muted, because the badge is the alert: a red dot
+ * that survives turning notifications off would make the switch a lie. The rows
+ * it would have counted are untouched and still listed on /notifications — a
+ * muted admin opening the centre finds the password-reset request waiting.
+ */
 export async function unreadCount(userId: string): Promise<number> {
+  if (!(await notificationsEnabled(userId))) return 0;
   return prisma.notification.count({ where: { recipientUserId: userId, readAt: null } });
+}
+
+// --- The account's notify-me switch -----------------------------------------
+
+/**
+ * A missing user reads as muted rather than throwing: this is only ever asked
+ * on the way to suppressing something, and the caller has nothing to send to.
+ */
+export async function notificationsEnabled(userId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { notificationsEnabled: true },
+  });
+  return user?.notificationsEnabled ?? false;
+}
+
+export async function getPreferences(userId: string): Promise<NotificationPrefsDto> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { notificationsEnabled: true },
+  });
+  if (!user) throw notFound('User');
+  return { notificationsEnabled: user.notificationsEnabled };
+}
+
+export async function setPreferences(
+  userId: string,
+  input: UpdateNotificationPrefsInput,
+): Promise<NotificationPrefsDto> {
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { notificationsEnabled: true },
+  });
+  if (!existing) throw notFound('User');
+
+  if (existing.notificationsEnabled !== input.notificationsEnabled) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { notificationsEnabled: input.notificationsEnabled },
+    });
+
+    // Worth a line in the log: "I was never told" is a real complaint, and this
+    // is the record of the account having asked not to be.
+    await audit({
+      actorId: userId,
+      action: input.notificationsEnabled ? 'NOTIFICATIONS_ENABLED' : 'NOTIFICATIONS_MUTED',
+      entity: 'User',
+      entityId: userId,
+    });
+  }
+
+  return { notificationsEnabled: input.notificationsEnabled };
 }
 
 export async function markRead(userId: string, notificationId: string): Promise<void> {

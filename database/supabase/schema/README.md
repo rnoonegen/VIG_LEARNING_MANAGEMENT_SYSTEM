@@ -61,6 +61,11 @@ only to generate the Prisma Client the backend queries through, and it is
 | `019_curriculum_uniqueness.sql` | one subject / level / heading / sub-heading per name, case-insensitive |
 | `020_profile_contacts.sql` | email, mobile, blood group, address, emergency contact on teachers and parents |
 | `021_moment_collections.sql` | moments as a collection — heading, dates and subject, with one entry per child |
+| `022_moment_others_folder.sql` | the catch-all "Others" folder for moments that belong to no subject |
+| `023_moment_cover.sql` | a moment carries its own cover photograph |
+| `024_moment_entry_groups.sql` | an entry can belong to a group of children, not only to one |
+| `025_moment_entry_repeat_students.sql` | a child may appear in a moment more than once |
+| `026_notification_preference.sql` | `users.notifications_enabled` — the account's own notify-me switch |
 
 Foreign keys live in one file applied last, so the 39 `CREATE TABLE` statements
 have no ordering dependency between files. Keep that convention: put new tables

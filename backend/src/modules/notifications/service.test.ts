@@ -13,23 +13,36 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const findUniqueUser = vi.fn();
 const findManyUser = vi.fn();
+const updateUser = vi.fn();
 const createNotification = vi.fn();
+const countNotification = vi.fn();
+const createAuditLog = vi.fn();
 
 vi.mock('../../prisma.js', () => ({
   prisma: {
     user: {
       findUnique: (...a: unknown[]) => findUniqueUser(...a),
       findMany: (...a: unknown[]) => findManyUser(...a),
+      update: (...a: unknown[]) => updateUser(...a),
     },
-    notification: { create: (...a: unknown[]) => createNotification(...a) },
+    notification: {
+      create: (...a: unknown[]) => createNotification(...a),
+      count: (...a: unknown[]) => countNotification(...a),
+    },
+    auditLog: { create: (...a: unknown[]) => createAuditLog(...a) },
   },
 }));
 
-const { notify, notifyAllAdmins } = await import('./service.js');
+const { getPreferences, notify, notifyAllAdmins, setPreferences, unreadCount } = await import(
+  './service.js'
+);
 
 beforeEach(() => {
   vi.clearAllMocks();
   createNotification.mockResolvedValue({});
+  countNotification.mockResolvedValue(0);
+  updateUser.mockResolvedValue({});
+  createAuditLog.mockResolvedValue({});
   // Keep the intentional "dropped" warning out of the test output.
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -126,5 +139,71 @@ describe('notifyAllAdmins', () => {
     findManyUser.mockResolvedValue([]);
     await notifyAllAdmins({ type: 'PASSWORD_RESET_REQUEST', title: 't', body: 'b' });
     expect(createNotification).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The account's notify-me switch (Settings → Notifications, all three roles).
+ *
+ * The rule these guard: OFF mutes, it does not discard. A muted admin still has
+ * the password-reset request waiting when they open the notification centre —
+ * only the badge and the push are suppressed. Anything that starts dropping
+ * rows at the write path has broken the setting, not implemented it.
+ */
+describe('notification preferences', () => {
+  it('reads the switch off the account', async () => {
+    findUniqueUser.mockResolvedValue({ notificationsEnabled: false });
+    await expect(getPreferences('u1')).resolves.toEqual({ notificationsEnabled: false });
+  });
+
+  it('rejects a preference read for a user who does not exist', async () => {
+    findUniqueUser.mockResolvedValue(null);
+    await expect(getPreferences('ghost')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('writes the change and records it', async () => {
+    findUniqueUser.mockResolvedValue({ notificationsEnabled: true });
+
+    await expect(setPreferences('u1', { notificationsEnabled: false })).resolves.toEqual({
+      notificationsEnabled: false,
+    });
+
+    expect(updateUser).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'u1' }, data: { notificationsEnabled: false } }),
+    );
+    expect(createAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: 'NOTIFICATIONS_MUTED' }) }),
+    );
+  });
+
+  it('does not write or log when the switch is already where it is being set', async () => {
+    findUniqueUser.mockResolvedValue({ notificationsEnabled: true });
+    await setPreferences('u1', { notificationsEnabled: true });
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(createAuditLog).not.toHaveBeenCalled();
+  });
+});
+
+describe('unreadCount — the badge', () => {
+  it('counts unread notifications for an account that is notified', async () => {
+    findUniqueUser.mockResolvedValue({ notificationsEnabled: true });
+    countNotification.mockResolvedValue(3);
+    await expect(unreadCount('u1')).resolves.toBe(3);
+  });
+
+  it('is zero while the account is muted', async () => {
+    findUniqueUser.mockResolvedValue({ notificationsEnabled: false });
+    countNotification.mockResolvedValue(3);
+
+    await expect(unreadCount('u1')).resolves.toBe(0);
+    // The rows are still there — muting is not deletion, and the notification
+    // centre must still be able to list them.
+    expect(countNotification).not.toHaveBeenCalled();
+  });
+
+  it('still writes notifications for a muted user', async () => {
+    findUniqueUser.mockResolvedValue({ role: 'ADMIN', status: 'ACTIVE', notificationsEnabled: false });
+    await notify({ recipientUserId: 'u1', type: 'PASSWORD_RESET_REQUEST', title: 't', body: 'b' });
+    expect(createNotification).toHaveBeenCalledOnce();
   });
 });

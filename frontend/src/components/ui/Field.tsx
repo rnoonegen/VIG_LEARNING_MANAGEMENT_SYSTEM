@@ -87,17 +87,27 @@ export function Select({
  * sliding it 22px from there threw it clear of the track and over whatever label
  * sat alongside — the knob vanished against the white card and ate the first
  * letter of the word next to it.
+ *
+ * `showState` writes ON / OFF into the track, for a switch that is the whole
+ * point of the screen it sits on rather than one cell of a grid. Knob position
+ * alone is a convention, and a convention has to be known before it can be
+ * read — on a setting somebody visits once a year, the word is worth the width.
+ * It stays opt-in because the availability grids place dozens of these at once,
+ * where the same word repeated forty times is noise and the extra 24px is a
+ * column that no longer fits.
  */
 export function Toggle({
   checked,
   onChange,
   label,
   disabled,
+  showState = false,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
   disabled?: boolean;
+  showState?: boolean;
 }) {
   return (
     <button
@@ -108,14 +118,30 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative h-6 w-11 shrink-0 overflow-hidden rounded-full border transition-colors disabled:opacity-50',
+        'relative h-6 shrink-0 overflow-hidden rounded-full border transition-colors disabled:opacity-50',
+        showState ? 'w-[68px]' : 'w-11',
         checked ? 'border-violet bg-violet' : 'border-line bg-lavender-2',
       )}
     >
+      {/* The word sits opposite the knob, so the two never collide as it slides.
+          Off is ink-2 rather than white or ink-3: the off track is #faf8ff, so
+          white is invisible on it and ink-3 reaches only 3.1:1 — under AA for
+          text this small. ink-2 is 5.9:1 and still reads as the quieter state. */}
+      {showState ? (
+        <span
+          className={cn(
+            'pointer-events-none absolute inset-y-0 flex items-center text-[10px] font-semibold uppercase tracking-wider',
+            checked ? 'left-3 text-white' : 'right-3 text-ink-2',
+          )}
+        >
+          {checked ? 'On' : 'Off'}
+        </span>
+      ) : null}
+
       <span
         className={cn(
           'absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform',
-          checked ? 'translate-x-[20px]' : 'translate-x-0',
+          checked ? (showState ? 'translate-x-[44px]' : 'translate-x-[20px]') : 'translate-x-0',
         )}
       />
     </button>

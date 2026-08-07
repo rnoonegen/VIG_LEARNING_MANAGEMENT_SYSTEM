@@ -962,6 +962,23 @@ export interface NotificationDto {
   createdAt: string;
 }
 
+/**
+ * The account's own notify-me switch, the same one for all three roles.
+ *
+ * Off is a mute, not an unsubscribe: push stops and the unread badge clears on
+ * every device, while the notification centre keeps listing everything. What
+ * each role receives at all is BR-14's business, not this setting's.
+ */
+export interface NotificationPrefsDto {
+  notificationsEnabled: boolean;
+}
+
+/** `meta` on GET /notifications and the payload of GET /notifications/unread-count. */
+export interface UnreadCountDto {
+  /** Zero whenever notifications are muted — the badge is an alert, and alerts are off. */
+  unread: number;
+}
+
 // --- Attendance -------------------------------------------------------------
 
 export interface AttendanceEntryDto {

@@ -186,6 +186,11 @@ model User {
   avatarPath         String?    @map("avatar_path")
   mustChangePassword Boolean    @default(true) @map("must_change_password")
   language           String     @default("en")
+  // The account's own "notify me" switch (Settings → Notifications). Off mutes
+  // push delivery and the unread badge on every device; notification rows are
+  // still written, so nothing waiting to be acted on is lost. BR-14 still
+  // decides *what* the role receives — this only decides whether it interrupts.
+  notificationsEnabled Boolean  @default(true) @map("notifications_enabled")
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   teacher             Teacher?
